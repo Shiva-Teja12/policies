@@ -1,129 +1,54 @@
 "use client";
 
-import { useState } from "react";
+import { FormEvent, useState } from "react";
 import Link from "next/link";
+
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
   const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
 
-  async function handleResetPassword() {
-    setError("");
-    setSuccess("");
-
-    // =========================
-    // FRONTEND VALIDATION
-    // =========================
-
-    if (!email.trim()) {
-      setError("Please enter your email address.");
-      return;
-    }
-
-    if (!newPassword) {
-      setError("Please enter a new password.");
-      return;
-    }
-
-    if (newPassword.length < 6) {
-      setError("Password must be at least 6 characters.");
-      return;
-    }
-
-    if (!confirmPassword) {
-      setError("Please confirm your new password.");
-      return;
-    }
-
-    if (newPassword !== confirmPassword) {
-      setError("Passwords do not match.");
-      return;
-    }
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
 
     setLoading(true);
+    setMessage("");
+    setError("");
 
     try {
-      // =========================
-      // CALL SPRING BOOT BACKEND
-      // =========================
-
       const response = await fetch(
-        "http://localhost:8080/api/auth/reset-password",
+        `${API_URL}/api/auth/forgot-password`,
         {
           method: "POST",
-
           headers: {
             "Content-Type": "application/json",
           },
-
           body: JSON.stringify({
-            email: email.trim().toLowerCase(),
-            newPassword: newPassword,
-            confirmPassword: confirmPassword,
+            email: email.trim(),
           }),
         }
       );
 
-      const responseText = await response.text();
-
-      console.log("Reset password status:", response.status);
-      console.log("Reset password response:", responseText);
-
-      let data: {
-        message?: string;
-      } = {};
-
-      if (responseText) {
-        try {
-          data = JSON.parse(responseText);
-        } catch {
-          // Backend may return plain text
-          data = {
-            message: responseText,
-          };
-        }
-      }
-
-      // =========================
-      // BACKEND ERROR
-      // =========================
+      const data = await response.text();
 
       if (!response.ok) {
         throw new Error(
-          data.message || "Unable to reset password."
+          data || "Unable to send password reset email"
         );
       }
 
-      // =========================
-      // SUCCESS
-      // =========================
-
-      setSuccess(
-        data.message ||
-          "Password reset successfully. You can now login with your new password."
+      setMessage(
+        "If an account exists for this email, a password reset link has been sent. Please check your Gmail."
       );
-
-      // Clear fields
-      setEmail("");
-      setNewPassword("");
-      setConfirmPassword("");
-
-    } catch (error) {
-      console.error("Reset password error:", error);
-
-      if (error instanceof TypeError) {
-        setError(
-          "Unable to connect to the backend. Make sure Spring Boot is running on port 8080."
-        );
-      } else if (error instanceof Error) {
-        setError(error.message);
+    } catch (err) {
+      if (err instanceof Error) {
+        setError(err.message);
       } else {
-        setError("Unable to reset password. Please try again.");
+        setError("Something went wrong");
       }
     } finally {
       setLoading(false);
@@ -131,49 +56,39 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-gray-100 px-4">
-
-      <div className="w-full max-w-md rounded-2xl bg-white p-8 shadow-lg">
-
-        {/* Header */}
-
+    <main className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-lg border border-slate-200 p-8">
         <div className="mb-8 text-center">
-
-          <h1 className="text-3xl font-bold text-gray-900">
-            Reset Password
+          <h1 className="text-3xl font-bold text-slate-900">
+            Forgot Password
           </h1>
 
-          <p className="mt-2 text-sm text-gray-500">
-            Enter your email and create a new password.
+          <p className="mt-2 text-sm text-slate-600">
+            Enter your registered email address. We will send you a
+            secure password reset link.
           </p>
-
         </div>
 
-        {/* Error */}
+        {message && (
+          <div className="mb-5 rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-700">
+            {message}
+          </div>
+        )}
 
         {error && (
-          <div className="mb-5 rounded-lg bg-red-50 p-3 text-sm text-red-600">
+          <div className="mb-5 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
             {error}
           </div>
         )}
 
-        {/* Success */}
-
-        {success && (
-          <div className="mb-5 rounded-lg bg-green-50 p-3 text-sm text-green-600">
-            {success}
-          </div>
-        )}
-
-        <div className="space-y-5">
-
-          {/* Email */}
-
+        <form
+          onSubmit={handleSubmit}
+          className="space-y-5"
+        >
           <div>
-
             <label
               htmlFor="email"
-              className="mb-2 block text-sm font-medium text-gray-700"
+              className="block text-sm font-medium text-slate-700 mb-2"
             >
               Email Address
             </label>
@@ -181,102 +96,36 @@ export default function ForgotPasswordPage() {
             <input
               id="email"
               type="email"
+              required
               value={email}
-              placeholder="Enter your registered email"
-              autoComplete="email"
-              onChange={(event) =>
-                setEmail(event.target.value)
+              onChange={(e) =>
+                setEmail(e.target.value)
               }
-              className="w-full rounded-lg border border-gray-300 px-4 py-3 outline-none focus:border-blue-500"
+              placeholder="employee@gmail.com"
+              className="w-full rounded-lg border border-slate-300 px-4 py-3 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
             />
-
           </div>
-
-          {/* New Password */}
-
-          <div>
-
-            <label
-              htmlFor="newPassword"
-              className="mb-2 block text-sm font-medium text-gray-700"
-            >
-              Create New Password
-            </label>
-
-            <input
-              id="newPassword"
-              type="password"
-              value={newPassword}
-              placeholder="Enter new password"
-              autoComplete="new-password"
-              onChange={(event) =>
-                setNewPassword(event.target.value)
-              }
-              className="w-full rounded-lg border border-gray-300 px-4 py-3 outline-none focus:border-blue-500"
-            />
-
-          </div>
-
-          {/* Confirm Password */}
-
-          <div>
-
-            <label
-              htmlFor="confirmPassword"
-              className="mb-2 block text-sm font-medium text-gray-700"
-            >
-              Confirm New Password
-            </label>
-
-            <input
-              id="confirmPassword"
-              type="password"
-              value={confirmPassword}
-              placeholder="Confirm new password"
-              autoComplete="new-password"
-              onChange={(event) =>
-                setConfirmPassword(event.target.value)
-              }
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  handleResetPassword();
-                }
-              }}
-              className="w-full rounded-lg border border-gray-300 px-4 py-3 outline-none focus:border-blue-500"
-            />
-
-          </div>
-
-          {/* Reset Button */}
 
           <button
-            type="button"
-            onClick={handleResetPassword}
+            type="submit"
             disabled={loading}
-            className="w-full rounded-lg bg-blue-600 py-3 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-400"
+            className="w-full rounded-lg bg-slate-900 py-3 font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {loading
-              ? "Resetting Password..."
-              : "Reset Password"}
+              ? "Sending Reset Link..."
+              : "Send Reset Link"}
           </button>
-
-        </div>
-
-        {/* Back to Login */}
+        </form>
 
         <div className="mt-6 text-center">
-
           <Link
             href="/login"
-            className="text-sm font-semibold text-blue-600 hover:underline"
+            className="text-sm font-medium text-slate-700 hover:text-slate-900"
           >
-            ← Back to Login
+            Back to Login
           </Link>
-
         </div>
-
       </div>
-
     </main>
   );
 }

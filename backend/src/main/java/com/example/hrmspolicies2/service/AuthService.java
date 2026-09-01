@@ -20,7 +20,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.example.hrmspolicies2.entity.PasswordResetToken;
+import com.example.hrmspolicies2.repository.PasswordResetTokenRepository;
 
+import java.time.LocalDateTime;
+import java.util.UUID;
 import java.util.Locale;
 import java.util.regex.Pattern;
 
@@ -50,24 +54,29 @@ public class AuthService {
     private final NewJoinerPolicyAssignmentService
             newJoinerPolicyAssignmentService;
 
+    private final PasswordResetTokenRepository passwordResetTokenRepository;
+
+    private final PasswordResetEmailService passwordResetEmailService;
+
     public AuthService(
             UserRepository userRepository,
             PasswordEncoder passwordEncoder,
             JwtService jwtService,
-            NewJoinerPolicyAssignmentService
-                    newJoinerPolicyAssignmentService
+            NewJoinerPolicyAssignmentService newJoinerPolicyAssignmentService,
+            PasswordResetTokenRepository passwordResetTokenRepository,
+            PasswordResetEmailService passwordResetEmailService
     ) {
-        this.userRepository =
-                userRepository;
-
-        this.passwordEncoder =
-                passwordEncoder;
-
-        this.jwtService =
-                jwtService;
-
+        this.userRepository = userRepository;
+        this.passwordEncoder = passwordEncoder;
+        this.jwtService = jwtService;
         this.newJoinerPolicyAssignmentService =
                 newJoinerPolicyAssignmentService;
+
+        this.passwordResetTokenRepository =
+                passwordResetTokenRepository;
+
+        this.passwordResetEmailService =
+                passwordResetEmailService;
     }
 
     // =========================================================
@@ -300,37 +309,69 @@ public class AuthService {
     // A production application should send a secure reset token.
     // =========================================================
 
-    @Transactional(readOnly = true)
+    @Transactional
     public String forgotPassword(
             ForgotPasswordRequest request
     ) {
-        if (request.getEmail() == null
-                || request.getEmail()
-                .isBlank()) {
-            throw new BadRequestException(
-                    "Email is required"
-            );
-        }
 
         String email =
                 normalizeEmail(
                         request.getEmail()
                 );
 
-        userRepository
-                .findByEmailIgnoreCase(
-                        email
-                )
-                .orElseThrow(() ->
-                        new ResourceNotFoundException(
-                                "No account found with this email"
-                        )
-                );
+        /*
+         * Do not reveal whether the email exists.
+         */
+        User user =
+                userRepository
+                        .findByEmailIgnoreCase(email)
+                        .orElse(null);
 
-        return "Email verified. "
-                + "You can now reset your password.";
+        if (user == null) {
+            return "If an account exists for this email, "
+                    + "a password reset link has been sent.";
+        }
+
+        /*
+         * Remove old reset tokens for this user.
+         */
+        passwordResetTokenRepository
+                .deleteByUser(user);
+
+        /*
+         * Generate secure random token.
+         */
+        String token =
+                UUID.randomUUID().toString()
+                        + UUID.randomUUID();
+
+        PasswordResetToken resetToken =
+                new PasswordResetToken();
+
+        resetToken.setToken(token);
+        resetToken.setUser(user);
+
+        /*
+         * Reset link is valid for 15 minutes.
+         */
+        resetToken.setExpiresAt(
+                LocalDateTime.now()
+                        .plusMinutes(15)
+        );
+
+        passwordResetTokenRepository.save(
+                resetToken
+        );
+
+        passwordResetEmailService.sendResetEmail(
+                user.getEmail(),
+                user.getName(),
+                token
+        );
+
+        return "If an account exists for this email, "
+                + "a password reset link has been sent.";
     }
-
     // =========================================================
     // RESET PASSWORD
     // The new password is always stored as a BCrypt hash.
@@ -340,84 +381,73 @@ public class AuthService {
     public String resetPassword(
             ResetPasswordRequest request
     ) {
-        if (request.getEmail() == null
-                || request.getEmail()
-                .isBlank()) {
-            throw new BadRequestException(
-                    "Email is required"
-            );
-        }
-
-        if (request.getNewPassword() == null
-                || request.getNewPassword()
-                .length() < 8) {
-            throw new BadRequestException(
-                    "Password must be at least 8 characters"
-            );
-        }
-
-        if (request.getConfirmPassword()
-                == null) {
-            throw new BadRequestException(
-                    "Confirm password is required"
-            );
-        }
 
         if (!request.getNewPassword()
-                .equals(
-                        request.getConfirmPassword()
-                )) {
+                .equals(request.getConfirmPassword())) {
+
             throw new BadRequestException(
-                    "Passwords do not match"
+                    "New password and confirm password do not match"
             );
         }
 
-        if (!STRONG_PASSWORD
-                .matcher(
-                        request.getNewPassword()
-                )
-                .matches()) {
-            throw new BadRequestException(
-                    "Password must contain uppercase, "
-                            + "lowercase, number and special character"
-            );
-        }
-
-        String email =
-                normalizeEmail(
-                        request.getEmail()
-                );
-
-        User user =
-                userRepository
-                        .findByEmailIgnoreCase(
-                                email
+        PasswordResetToken resetToken =
+                passwordResetTokenRepository
+                        .findByToken(
+                                request.getToken()
                         )
                         .orElseThrow(() ->
-                                new ResourceNotFoundException(
-                                        "No account found with this email"
+                                new BadRequestException(
+                                        "Invalid password reset link"
                                 )
                         );
 
+        if (resetToken.isUsed()) {
+            throw new BadRequestException(
+                    "This password reset link has already been used"
+            );
+        }
+
+        if (resetToken.isExpired()) {
+            throw new BadRequestException(
+                    "Password reset link has expired"
+            );
+        }
+
+        User user =
+                resetToken.getUser();
+
+        /*
+         * Never save plain-text passwords.
+         */
         user.setPassword(
                 passwordEncoder.encode(
                         request.getNewPassword()
                 )
         );
 
-        userRepository.save(
-                user
+        userRepository.save(user);
+
+        /*
+         * Prevent reuse of the reset link.
+         */
+        resetToken.setUsed(true);
+
+        passwordResetTokenRepository.save(
+                resetToken
         );
 
-        log.info(
-                "Password reset completed for userId={}, email={}",
-                user.getId(),
-                user.getEmail()
-        );
+        /*
+         * Only send confirmation.
+         * Never send the actual password.
+         */
+        passwordResetEmailService
+                .sendPasswordChangedEmail(
+                        user.getEmail(),
+                        user.getName()
+                );
 
-        return "Password updated successfully";
+        return "Password reset successfully";
     }
-
     // =========================================================
     // HELPERS
     // =========================================================
