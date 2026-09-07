@@ -25,6 +25,10 @@ public class AuthController {
         this.authService = authService;
     }
 
+    // =========================================================
+    // SIGNUP
+    // =========================================================
+
     @PostMapping("/signup")
     @Operation(
             summary = "Create an Employee account",
@@ -35,8 +39,14 @@ public class AuthController {
     ) {
         return ResponseEntity
                 .status(HttpStatus.CREATED)
-                .body(authService.signup(request));
+                .body(
+                        authService.signup(request)
+                );
     }
+
+    // =========================================================
+    // LOGIN
+    // =========================================================
 
     @PostMapping("/login")
     @Operation(
@@ -50,6 +60,10 @@ public class AuthController {
         );
     }
 
+    // =========================================================
+    // FORGOT PASSWORD
+    // =========================================================
+
     @PostMapping("/forgot-password")
     public ResponseEntity<String> forgotPassword(
             @RequestBody ForgotPasswordRequest request
@@ -58,6 +72,24 @@ public class AuthController {
                 authService.forgotPassword(request)
         );
     }
+
+    // =========================================================
+    // VALIDATE PASSWORD RESET TOKEN
+    // Called when the reset-password page first opens.
+    // =========================================================
+
+    @GetMapping("/validate-reset-token")
+    public ResponseEntity<String> validateResetToken(
+            @RequestParam String token
+    ) {
+        return ResponseEntity.ok(
+                authService.validateResetToken(token)
+        );
+    }
+
+    // =========================================================
+    // RESET PASSWORD
+    // =========================================================
 
     @PostMapping("/reset-password")
     public ResponseEntity<String> resetPassword(

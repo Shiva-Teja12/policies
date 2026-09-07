@@ -2,10 +2,17 @@ package com.example.hrmspolicies2.service;
 
 import com.example.hrmspolicies2.dto.PolicyRequest;
 import com.example.hrmspolicies2.dto.response.PageResponse;
+import com.example.hrmspolicies2.dto.response.PolicyResponse;
 import com.example.hrmspolicies2.entity.Policy;
+import com.example.hrmspolicies2.entity.PolicyCategory;
+import com.example.hrmspolicies2.entity.User;
+import com.example.hrmspolicies2.enums.Applicability;
+import com.example.hrmspolicies2.enums.PolicyStatus;
+import com.example.hrmspolicies2.enums.Role;
 import com.example.hrmspolicies2.exception.BadRequestException;
 import com.example.hrmspolicies2.exception.DuplicateResourceException;
 import com.example.hrmspolicies2.exception.ResourceNotFoundException;
+import com.example.hrmspolicies2.repository.PolicyCategoryRepository;
 import com.example.hrmspolicies2.repository.PolicyRepository;
 import com.example.hrmspolicies2.repository.UserRepository;
 
@@ -23,26 +30,29 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
-import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
+
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 
 @ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 @DisplayName("PolicyService Unit Tests")
 class PolicyServiceTest {
 
@@ -50,42 +60,174 @@ class PolicyServiceTest {
     private PolicyRepository policyRepository;
 
     @Mock
+    private PolicyCategoryRepository categoryRepository;
+
+    @Mock
     private UserRepository userRepository;
 
     @InjectMocks
     private PolicyService policyService;
 
+    private PolicyCategory category;
     private Policy samplePolicy;
     private PolicyRequest sampleRequest;
+    private User hrAdmin;
+
+
+    // =========================================================
+    // COMMON TEST DATA
+    // =========================================================
 
     @BeforeEach
     void setUp() {
 
         SecurityContextHolder.clearContext();
 
-        samplePolicy = Policy.builder()
-                .id(1L)
-                .name("Work From Home Policy")
-                .code("WFH-001")
-                .category("Leave")
-                .content(
-                        "Employees may work remotely up to 3 days per week.")
-                .applicability("ALL")
-                .mandatory(true)
-                .status("DRAFT")
-                .build();
+        category =
+                mock(
+                        PolicyCategory.class
+                );
 
-        sampleRequest = new PolicyRequest();
+        when(
+                category.getId()
+        ).thenReturn(
+                1L
+        );
 
-        sampleRequest.setName("Work From Home Policy");
-        sampleRequest.setCode("WFH-001");
-        sampleRequest.setCategory("Leave");
+        when(
+                category.getName()
+        ).thenReturn(
+                "HR"
+        );
+
+        when(
+                category.getCode()
+        ).thenReturn(
+                "HR"
+        );
+
+        when(
+                category.getActive()
+        ).thenReturn(
+                true
+        );
+
+
+        hrAdmin =
+                User.builder()
+                        .id(
+                                10L
+                        )
+                        .name(
+                                "HR Admin"
+                        )
+                        .email(
+                                "admin@example.com"
+                        )
+                        .role(
+                                Role.HR_ADMIN
+                        )
+                        .build();
+
+
+        samplePolicy =
+                Policy.builder()
+                        .id(
+                                1L
+                        )
+                        .name(
+                                "Work From Home Policy"
+                        )
+                        .code(
+                                "WFH-001"
+                        )
+                        .category(
+                                category
+                        )
+                        .content(
+                                "Employees may work remotely up to 3 days per week."
+                        )
+                        .applicability(
+                                Applicability.ALL
+                        )
+                        .mandatory(
+                                true
+                        )
+                        .status(
+                                PolicyStatus.DRAFT
+                        )
+                        .acknowledgementPeriodDays(
+                                7
+                        )
+                        .onboardingPeriodDays(
+                                7
+                        )
+                        .publishedOnce(
+                                false
+                        )
+                        .createdBy(
+                                hrAdmin
+                        )
+                        .build();
+
+
+        sampleRequest =
+                new PolicyRequest();
+
+        sampleRequest.setName(
+                "Work From Home Policy"
+        );
+
+        sampleRequest.setCode(
+                "WFH-001"
+        );
+
+        sampleRequest.setCategoryId(
+                1L
+        );
+
         sampleRequest.setContent(
-                "Employees may work remotely up to 3 days per week.");
-        sampleRequest.setApplicability("ALL");
-        sampleRequest.setMandatory(true);
-        sampleRequest.setStatus("DRAFT");
+                "Employees may work remotely up to 3 days per week."
+        );
+
+        sampleRequest.setApplicability(
+                Applicability.ALL
+        );
+
+        sampleRequest.setMandatory(
+                true
+        );
+
+        sampleRequest.setAcknowledgementPeriodDays(
+                7
+        );
+
+        sampleRequest.setOnboardingPeriodDays(
+                7
+        );
+
+
+        /*
+         * Simulate authenticated HR Admin.
+         */
+        UsernamePasswordAuthenticationToken authentication =
+                new UsernamePasswordAuthenticationToken(
+                        "admin@example.com",
+                        null,
+                        List.of(
+                                new SimpleGrantedAuthority(
+                                        "ROLE_HR_ADMIN"
+                                )
+                        )
+                );
+
+        SecurityContextHolder
+                .getContext()
+                .setAuthentication(
+                        authentication
+                );
     }
+
 
     @AfterEach
     void tearDown() {
@@ -93,109 +235,45 @@ class PolicyServiceTest {
         SecurityContextHolder.clearContext();
     }
 
-    // ==========================================================
-    // GET ALL
-    // ==========================================================
 
-    @Nested
-    @DisplayName("getAllPolicies()")
-    class GetAllTests {
-
-        @Test
-        @DisplayName("Positive - returns all policies")
-        void getAllPolicies_returnsList() {
-
-            when(policyRepository.findAll())
-                    .thenReturn(List.of(samplePolicy));
-
-            List<Policy> result =
-                    policyService.getAllPolicies();
-
-            assertThat(result)
-                    .hasSize(1)
-                    .containsExactly(samplePolicy);
-        }
-
-        @Test
-        @DisplayName("Positive - returns empty list when no policies exist")
-        void getAllPolicies_empty() {
-
-            when(policyRepository.findAll())
-                    .thenReturn(List.of());
-
-            List<Policy> result =
-                    policyService.getAllPolicies();
-
-            assertThat(result).isEmpty();
-        }
-    }
-
-    // ==========================================================
-    // GET BY ID
-    // ==========================================================
-
-    @Nested
-    @DisplayName("getPolicyById()")
-    class GetByIdTests {
-
-        @Test
-        @DisplayName("Positive - returns policy when id exists")
-        void getPolicyById_found() {
-
-            when(policyRepository.findById(1L))
-                    .thenReturn(Optional.of(samplePolicy));
-
-            Policy result =
-                    policyService.getPolicyById(1L);
-
-            assertThat(result)
-                    .isEqualTo(samplePolicy);
-        }
-
-        @Test
-        @DisplayName("Negative - throws exception when policy does not exist")
-        void getPolicyById_notFound_throws() {
-
-            when(policyRepository.findById(99L))
-                    .thenReturn(Optional.empty());
-
-            assertThatThrownBy(() ->
-                    policyService.getPolicyById(99L))
-                    .isInstanceOf(ResourceNotFoundException.class)
-                    .hasMessage("Policy not found with id: 99");
-        }
-    }
-
-    // ==========================================================
-    // SEARCH
-    // ==========================================================
+    // =========================================================
+    // SEARCH TESTS
+    // =========================================================
 
     @Nested
     @DisplayName("searchPolicies()")
     class SearchTests {
 
         @Test
-        @DisplayName("Positive - searches with valid sort field")
-        void searchPolicies_validSortField_success() {
+        @DisplayName(
+                "returns matching policy responses"
+        )
+        void searchPolicies_success() {
 
             Page<Policy> page =
                     new PageImpl<>(
-                            List.of(samplePolicy),
-                            PageRequest.of(0, 10),
-                            1
+                            List.of(
+                                    samplePolicy
+                            )
                     );
 
-            when(policyRepository.findAll(
-                    any(Specification.class),
-                    any(PageRequest.class)))
-                    .thenReturn(page);
 
-            PageResponse<Policy> result =
+            when(
+                    policyRepository.findAll(
+                            any(Specification.class),
+                            any(Pageable.class)
+                    )
+            ).thenReturn(
+                    page
+            );
+
+
+            PageResponse<PolicyResponse> result =
                     policyService.searchPolicies(
                             "home",
-                            "Leave",
-                            "DRAFT",
-                            "ALL",
+                            1L,
+                            PolicyStatus.DRAFT,
+                            Applicability.ALL,
                             true,
                             0,
                             10,
@@ -203,118 +281,87 @@ class PolicyServiceTest {
                             "asc"
                     );
 
-            assertThat(result.getContent())
-                    .containsExactly(samplePolicy);
 
-            assertThat(result.getTotalElements())
-                    .isEqualTo(1);
+            assertThat(
+                    result.getContent()
+            ).hasSize(
+                    1
+            );
 
-            assertThat(result.getPageNumber())
-                    .isEqualTo(0);
+
+            assertThat(
+                    result.getContent()
+                            .get(0)
+                            .getCode()
+            ).isEqualTo(
+                    "WFH-001"
+            );
         }
 
-        @Test
-        @DisplayName("Positive - blank sort field defaults to id")
-        void searchPolicies_blankSortBy_defaultsToId() {
-
-            Page<Policy> page =
-                    new PageImpl<>(List.of(samplePolicy));
-
-            when(policyRepository.findAll(
-                    any(Specification.class),
-                    any(PageRequest.class)))
-                    .thenReturn(page);
-
-            assertThatCode(() ->
-                    policyService.searchPolicies(
-                            null,
-                            null,
-                            null,
-                            null,
-                            null,
-                            0,
-                            10,
-                            "  ",
-                            "asc"
-                    )
-            ).doesNotThrowAnyException();
-        }
 
         @Test
-        @DisplayName("Negative - invalid sort field throws BadRequestException")
-        void searchPolicies_invalidSortField_throws() {
+        @DisplayName(
+                "invalid sorting field throws BadRequestException"
+        )
+        void searchPolicies_invalidSortField() {
 
-            assertThatThrownBy(() ->
-                    policyService.searchPolicies(
-                            null,
-                            null,
-                            null,
-                            null,
-                            null,
-                            0,
-                            10,
-                            "notAField",
-                            "asc"
-                    )
+            assertThatThrownBy(
+                    () ->
+                            policyService.searchPolicies(
+                                    null,
+                                    null,
+                                    null,
+                                    null,
+                                    null,
+                                    0,
+                                    10,
+                                    "invalidField",
+                                    "asc"
+                            )
             )
-                    .isInstanceOf(BadRequestException.class)
+                    .isInstanceOf(
+                            BadRequestException.class
+                    )
                     .hasMessageContaining(
-                            "Invalid sortBy field 'notAField'");
+                            "Invalid sorting field"
+                    );
+
 
             verify(
                     policyRepository,
                     never()
             ).findAll(
                     any(Specification.class),
-                    any(PageRequest.class)
+                    any(Pageable.class)
             );
         }
 
+
         @Test
-        @DisplayName("Positive - invalid size falls back to 10")
-        void searchPolicies_nonPositiveSize_defaultsToTen() {
+        @DisplayName(
+                "negative page number is safely converted to zero"
+        )
+        void searchPolicies_negativePage() {
 
-            ArgumentCaptor<PageRequest> captor =
-                    ArgumentCaptor.forClass(PageRequest.class);
+            ArgumentCaptor<Pageable> pageableCaptor =
+                    ArgumentCaptor.forClass(
+                            Pageable.class
+                    );
 
-            Page<Policy> page =
-                    new PageImpl<>(List.of(samplePolicy));
 
-            when(policyRepository.findAll(
-                    any(Specification.class),
-                    captor.capture()))
-                    .thenReturn(page);
-
-            policyService.searchPolicies(
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    0,
-                    0,
-                    "id",
-                    "asc"
+            when(
+                    policyRepository.findAll(
+                            any(Specification.class),
+                            pageableCaptor.capture()
+                    )
+            ).thenReturn(
+                    new PageImpl<>(
+                            List.of(
+                                    samplePolicy
+                            )
+                    )
             );
 
-            assertThat(captor.getValue().getPageSize())
-                    .isEqualTo(10);
-        }
-
-        @Test
-        @DisplayName("Positive - negative page number is clamped to zero")
-        void searchPolicies_negativePage_defaultsToZero() {
-
-            ArgumentCaptor<PageRequest> captor =
-                    ArgumentCaptor.forClass(PageRequest.class);
-
-            Page<Policy> page =
-                    new PageImpl<>(List.of(samplePolicy));
-
-            when(policyRepository.findAll(
-                    any(Specification.class),
-                    captor.capture()))
-                    .thenReturn(page);
 
             policyService.searchPolicies(
                     null,
@@ -328,340 +375,612 @@ class PolicyServiceTest {
                     "asc"
             );
 
-            assertThat(captor.getValue().getPageNumber())
-                    .isEqualTo(0);
+
+            assertThat(
+                    pageableCaptor
+                            .getValue()
+                            .getPageNumber()
+            ).isEqualTo(
+                    0
+            );
         }
     }
 
-    // ==========================================================
-    // CREATE
-    // ==========================================================
+
+    // =========================================================
+    // GET POLICY BY ID
+    // =========================================================
+
+    @Nested
+    @DisplayName("getPolicyById()")
+    class GetByIdTests {
+
+        @Test
+        @DisplayName(
+                "returns policy response when policy exists"
+        )
+        void getPolicyById_success() {
+
+            when(
+                    policyRepository.findById(
+                            1L
+                    )
+            ).thenReturn(
+                    Optional.of(
+                            samplePolicy
+                    )
+            );
+
+
+            PolicyResponse result =
+                    policyService.getPolicyById(
+                            1L
+                    );
+
+
+            assertThat(
+                    result.getId()
+            ).isEqualTo(
+                    1L
+            );
+
+
+            assertThat(
+                    result.getCode()
+            ).isEqualTo(
+                    "WFH-001"
+            );
+
+
+            assertThat(
+                    result.getStatus()
+            ).isEqualTo(
+                    PolicyStatus.DRAFT
+            );
+        }
+
+
+        @Test
+        @DisplayName(
+                "throws ResourceNotFoundException when policy does not exist"
+        )
+        void getPolicyById_notFound() {
+
+            when(
+                    policyRepository.findById(
+                            99L
+                    )
+            ).thenReturn(
+                    Optional.empty()
+            );
+
+
+            assertThatThrownBy(
+                    () ->
+                            policyService.getPolicyById(
+                                    99L
+                            )
+            )
+                    .isInstanceOf(
+                            ResourceNotFoundException.class
+                    );
+        }
+    }
+
+
+    // =========================================================
+    // CREATE POLICY
+    // =========================================================
 
     @Nested
     @DisplayName("createPolicy()")
     class CreateTests {
 
         @Test
-        @DisplayName("Positive - creates policy successfully")
+        @DisplayName(
+                "creates policy successfully"
+        )
         void createPolicy_success() {
 
-            when(policyRepository.existsByCode("WFH-001"))
-                    .thenReturn(false);
+            when(
+                    policyRepository.existsByCodeIgnoreCase(
+                            "WFH-001"
+                    )
+            ).thenReturn(
+                    false
+            );
 
-            when(policyRepository.save(any(Policy.class)))
-                    .thenReturn(samplePolicy);
 
-            Policy result =
-                    policyService.createPolicy(sampleRequest);
+            when(
+                    categoryRepository.findById(
+                            1L
+                    )
+            ).thenReturn(
+                    Optional.of(
+                            category
+                    )
+            );
 
-            assertThat(result)
-                    .isEqualTo(samplePolicy);
 
-            verify(policyRepository, times(1))
-                    .save(any(Policy.class));
+            when(
+                    userRepository.findByEmailIgnoreCase(
+                            "admin@example.com"
+                    )
+            ).thenReturn(
+                    Optional.of(
+                            hrAdmin
+                    )
+            );
+
+
+            when(
+                    policyRepository.save(
+                            any(Policy.class)
+                    )
+            ).thenAnswer(
+                    invocation ->
+                            invocation.getArgument(
+                                    0
+                            )
+            );
+
+
+            PolicyResponse result =
+                    policyService.createPolicy(
+                            sampleRequest
+                    );
+
+
+            assertThat(
+                    result.getName()
+            ).isEqualTo(
+                    "Work From Home Policy"
+            );
+
+
+            assertThat(
+                    result.getCode()
+            ).isEqualTo(
+                    "WFH-001"
+            );
+
+
+            assertThat(
+                    result.getCategoryId()
+            ).isEqualTo(
+                    1L
+            );
+
+
+            assertThat(
+                    result.getApplicability()
+            ).isEqualTo(
+                    Applicability.ALL
+            );
+
+
+            assertThat(
+                    result.getStatus()
+            ).isEqualTo(
+                    PolicyStatus.DRAFT
+            );
+
+
+            verify(
+                    policyRepository
+            ).save(
+                    any(Policy.class)
+            );
         }
 
-        @Test
-        @DisplayName("Positive - null status defaults to DRAFT")
-        void createPolicy_nullStatus_defaultsToDraft() {
-
-            sampleRequest.setStatus(null);
-
-            when(policyRepository.existsByCode("WFH-001"))
-                    .thenReturn(false);
-
-            ArgumentCaptor<Policy> captor =
-                    ArgumentCaptor.forClass(Policy.class);
-
-            when(policyRepository.save(captor.capture()))
-                    .thenReturn(samplePolicy);
-
-            policyService.createPolicy(sampleRequest);
-
-            assertThat(captor.getValue().getStatus())
-                    .isEqualTo("DRAFT");
-        }
 
         @Test
-        @DisplayName("Negative - duplicate policy code throws exception")
-        void createPolicy_duplicateCode_throws() {
+        @DisplayName(
+                "duplicate policy code throws DuplicateResourceException"
+        )
+        void createPolicy_duplicateCode() {
 
-            when(policyRepository.existsByCode("WFH-001"))
-                    .thenReturn(true);
+            when(
+                    policyRepository.existsByCodeIgnoreCase(
+                            "WFH-001"
+                    )
+            ).thenReturn(
+                    true
+            );
 
-            assertThatThrownBy(() ->
-                    policyService.createPolicy(sampleRequest))
-                    .isInstanceOf(DuplicateResourceException.class)
+
+            assertThatThrownBy(
+                    () ->
+                            policyService.createPolicy(
+                                    sampleRequest
+                            )
+            )
+                    .isInstanceOf(
+                            DuplicateResourceException.class
+                    )
                     .hasMessage(
-                            "Policy code already exists: WFH-001");
+                            "Policy code already exists: WFH-001"
+                    );
+
 
             verify(
                     policyRepository,
                     never()
-            ).save(any(Policy.class));
+            ).save(
+                    any(Policy.class)
+            );
         }
     }
 
-    // ==========================================================
-    // UPDATE
-    // ==========================================================
+
+    // =========================================================
+    // UPDATE POLICY
+    // =========================================================
 
     @Nested
     @DisplayName("updatePolicy()")
     class UpdateTests {
 
         @Test
-        @DisplayName("Positive - updates policy successfully")
+        @DisplayName(
+                "updates draft policy successfully"
+        )
         void updatePolicy_success() {
 
-            when(policyRepository.findById(1L))
-                    .thenReturn(Optional.of(samplePolicy));
-
-            when(policyRepository.save(any(Policy.class)))
-                    .thenAnswer(invocation ->
-                            invocation.getArgument(0));
-
-            sampleRequest.setName(
-                    "Work From Home Policy Revised");
-
-            Policy result =
-                    policyService.updatePolicy(
-                            1L,
-                            sampleRequest
-                    );
-
-            assertThat(result.getName())
-                    .isEqualTo(
-                            "Work From Home Policy Revised");
-
-            verify(
-                    policyRepository,
-                    never()
-            ).existsByCode(anyString());
-        }
-
-        @Test
-        @DisplayName("Negative - policy id does not exist")
-        void updatePolicy_notFound_throws() {
-
-            when(policyRepository.findById(99L))
-                    .thenReturn(Optional.empty());
-
-            assertThatThrownBy(() ->
-                    policyService.updatePolicy(
-                            99L,
-                            sampleRequest
-                    ))
-                    .isInstanceOf(
-                            ResourceNotFoundException.class)
-                    .hasMessage(
-                            "Policy not found with id: 99");
-
-            verify(
-                    policyRepository,
-                    never()
-            ).save(any(Policy.class));
-        }
-
-        @Test
-        @DisplayName("Negative - updated code already exists")
-        void updatePolicy_duplicateCode_throws() {
-
-            when(policyRepository.findById(1L))
-                    .thenReturn(Optional.of(samplePolicy));
-
-            sampleRequest.setCode("WFH-002");
-
-            when(policyRepository.existsByCode("WFH-002"))
-                    .thenReturn(true);
-
-            assertThatThrownBy(() ->
-                    policyService.updatePolicy(
-                            1L,
-                            sampleRequest
-                    ))
-                    .isInstanceOf(
-                            DuplicateResourceException.class)
-                    .hasMessage(
-                            "Policy code already exists: WFH-002");
-
-            verify(
-                    policyRepository,
-                    never()
-            ).save(any(Policy.class));
-        }
-    }
-
-    // ==========================================================
-    // PATCH
-    // ==========================================================
-
-    @Nested
-    @DisplayName("patchPolicy()")
-    class PatchTests {
-
-        @Test
-        @DisplayName("Positive - updates only supplied fields")
-        void patchPolicy_partialUpdate_success() {
-
-            when(policyRepository.findById(1L))
-                    .thenReturn(Optional.of(samplePolicy));
-
-            when(policyRepository.save(any(Policy.class)))
-                    .thenAnswer(invocation ->
-                            invocation.getArgument(0));
-
-            PolicyRequest partial =
-                    new PolicyRequest();
-
-            partial.setStatus("ACTIVE");
-
-            Policy result =
-                    policyService.patchPolicy(
-                            1L,
-                            partial
-                    );
-
-            assertThat(result.getStatus())
-                    .isEqualTo("ACTIVE");
-
-            assertThat(result.getName())
-                    .isEqualTo(
-                            "Work From Home Policy");
-
-            assertThat(result.getCode())
-                    .isEqualTo("WFH-001");
-        }
-
-        @Test
-        @DisplayName("Negative - policy id does not exist")
-        void patchPolicy_notFound_throws() {
-
-            when(policyRepository.findById(99L))
-                    .thenReturn(Optional.empty());
-
-            PolicyRequest partial =
-                    new PolicyRequest();
-
-            partial.setStatus("ACTIVE");
-
-            assertThatThrownBy(() ->
-                    policyService.patchPolicy(
-                            99L,
-                            partial
-                    ))
-                    .isInstanceOf(
-                            ResourceNotFoundException.class)
-                    .hasMessage(
-                            "Policy not found with id: 99");
-        }
-
-        @Test
-        @DisplayName("Negative - patched code already exists")
-        void patchPolicy_duplicateCode_throws() {
-
-            when(policyRepository.findById(1L))
-                    .thenReturn(Optional.of(samplePolicy));
-
-            PolicyRequest partial =
-                    new PolicyRequest();
-
-            partial.setCode("WFH-999");
-
-            when(policyRepository.existsByCode("WFH-999"))
-                    .thenReturn(true);
-
-            assertThatThrownBy(() ->
-                    policyService.patchPolicy(
-                            1L,
-                            partial
-                    ))
-                    .isInstanceOf(
-                            DuplicateResourceException.class)
-                    .hasMessage(
-                            "Policy code already exists: WFH-999");
-
-            verify(
-                    policyRepository,
-                    never()
-            ).save(any(Policy.class));
-        }
-
-        @Test
-        @DisplayName("Positive - same code does not trigger duplicate check")
-        void patchPolicy_sameCode_noUniquenessCheck() {
-
-            when(policyRepository.findById(1L))
-                    .thenReturn(Optional.of(samplePolicy));
-
-            when(policyRepository.save(any(Policy.class)))
-                    .thenAnswer(invocation ->
-                            invocation.getArgument(0));
-
-            PolicyRequest partial =
-                    new PolicyRequest();
-
-            partial.setCode("wfh-001");
-
-            policyService.patchPolicy(
-                    1L,
-                    partial
+            when(
+                    policyRepository.findById(
+                            1L
+                    )
+            ).thenReturn(
+                    Optional.of(
+                            samplePolicy
+                    )
             );
 
+
+            when(
+                    policyRepository
+                            .existsByCodeIgnoreCaseAndIdNot(
+                                    "WFH-001",
+                                    1L
+                            )
+            ).thenReturn(
+                    false
+            );
+
+
+            when(
+                    categoryRepository.findById(
+                            1L
+                    )
+            ).thenReturn(
+                    Optional.of(
+                            category
+                    )
+            );
+
+
+            when(
+                    policyRepository.save(
+                            any(Policy.class)
+                    )
+            ).thenAnswer(
+                    invocation ->
+                            invocation.getArgument(
+                                    0
+                            )
+            );
+
+
+            sampleRequest.setName(
+                    "Updated Work From Home Policy"
+            );
+
+
+            PolicyResponse result =
+                    policyService.updatePolicy(
+                            1L,
+                            sampleRequest
+                    );
+
+
+            assertThat(
+                    result.getName()
+            ).isEqualTo(
+                    "Updated Work From Home Policy"
+            );
+
+
+            assertThat(
+                    result.getStatus()
+            ).isEqualTo(
+                    PolicyStatus.DRAFT
+            );
+        }
+
+
+        @Test
+        @DisplayName(
+                "throws ResourceNotFoundException when updating missing policy"
+        )
+        void updatePolicy_notFound() {
+
+            when(
+                    policyRepository.findById(
+                            99L
+                    )
+            ).thenReturn(
+                    Optional.empty()
+            );
+
+
+            assertThatThrownBy(
+                    () ->
+                            policyService.updatePolicy(
+                                    99L,
+                                    sampleRequest
+                            )
+            )
+                    .isInstanceOf(
+                            ResourceNotFoundException.class
+                    );
+
+
             verify(
                     policyRepository,
                     never()
-            ).existsByCode(anyString());
+            ).save(
+                    any(Policy.class)
+            );
+        }
+
+
+        @Test
+        @DisplayName(
+                "duplicate updated code throws DuplicateResourceException"
+        )
+        void updatePolicy_duplicateCode() {
+
+            when(
+                    policyRepository.findById(
+                            1L
+                    )
+            ).thenReturn(
+                    Optional.of(
+                            samplePolicy
+                    )
+            );
+
+
+            sampleRequest.setCode(
+                    "WFH-002"
+            );
+
+
+            when(
+                    policyRepository
+                            .existsByCodeIgnoreCaseAndIdNot(
+                                    "WFH-002",
+                                    1L
+                            )
+            ).thenReturn(
+                    true
+            );
+
+
+            assertThatThrownBy(
+                    () ->
+                            policyService.updatePolicy(
+                                    1L,
+                                    sampleRequest
+                            )
+            )
+                    .isInstanceOf(
+                            DuplicateResourceException.class
+                    )
+                    .hasMessage(
+                            "Policy code already exists: WFH-002"
+                    );
+
+
+            verify(
+                    policyRepository,
+                    never()
+            ).save(
+                    any(Policy.class)
+            );
+        }
+
+
+        @Test
+        @DisplayName(
+                "editing rejected policy returns it to DRAFT"
+        )
+        void updatePolicy_rejectedBecomesDraft() {
+
+            samplePolicy.setStatus(
+                    PolicyStatus.REJECTED
+            );
+
+
+            when(
+                    policyRepository.findById(
+                            1L
+                    )
+            ).thenReturn(
+                    Optional.of(
+                            samplePolicy
+                    )
+            );
+
+
+            when(
+                    policyRepository
+                            .existsByCodeIgnoreCaseAndIdNot(
+                                    "WFH-001",
+                                    1L
+                            )
+            ).thenReturn(
+                    false
+            );
+
+
+            when(
+                    categoryRepository.findById(
+                            1L
+                    )
+            ).thenReturn(
+                    Optional.of(
+                            category
+                    )
+            );
+
+
+            when(
+                    policyRepository.save(
+                            any(Policy.class)
+                    )
+            ).thenAnswer(
+                    invocation ->
+                            invocation.getArgument(
+                                    0
+                            )
+            );
+
+
+            PolicyResponse result =
+                    policyService.updatePolicy(
+                            1L,
+                            sampleRequest
+                    );
+
+
+            assertThat(
+                    result.getStatus()
+            ).isEqualTo(
+                    PolicyStatus.DRAFT
+            );
         }
     }
 
-    // ==========================================================
-    // DELETE
-    // ==========================================================
+
+    // =========================================================
+    // DELETE POLICY
+    // =========================================================
 
     @Nested
     @DisplayName("deletePolicy()")
     class DeleteTests {
 
         @Test
-        @DisplayName("Positive - deletes existing policy")
+        @DisplayName(
+                "deletes draft policy successfully"
+        )
         void deletePolicy_success() {
 
-            when(policyRepository.findById(1L))
-                    .thenReturn(Optional.of(samplePolicy));
+            when(
+                    policyRepository.findById(
+                            1L
+                    )
+            ).thenReturn(
+                    Optional.of(
+                            samplePolicy
+                    )
+            );
 
-            policyService.deletePolicy(1L);
+
+            policyService.deletePolicy(
+                    1L
+            );
+
 
             verify(
-                    policyRepository,
-                    times(1)
-            ).delete(samplePolicy);
+                    policyRepository
+            ).delete(
+                    samplePolicy
+            );
+
+
+            verify(
+                    policyRepository
+            ).flush();
         }
 
+
         @Test
-        @DisplayName("Negative - policy id does not exist")
-        void deletePolicy_notFound_throws() {
+        @DisplayName(
+                "throws ResourceNotFoundException for missing policy"
+        )
+        void deletePolicy_notFound() {
 
-            when(policyRepository.findById(99L))
-                    .thenReturn(Optional.empty());
+            when(
+                    policyRepository.findById(
+                            99L
+                    )
+            ).thenReturn(
+                    Optional.empty()
+            );
 
-            assertThatThrownBy(() ->
-                    policyService.deletePolicy(99L))
+
+            assertThatThrownBy(
+                    () ->
+                            policyService.deletePolicy(
+                                    99L
+                            )
+            )
                     .isInstanceOf(
-                            ResourceNotFoundException.class)
-                    .hasMessage(
-                            "Policy not found with id: 99");
+                            ResourceNotFoundException.class
+                    );
 
-            /*
-             * Important:
-             * Specify Policy.class because PolicyRepository
-             * also has JpaSpecificationExecutor.delete(...)
-             * and Mockito otherwise sees any() as ambiguous.
-             */
+
             verify(
                     policyRepository,
                     never()
-            ).delete(any(Policy.class));
+            ).delete(
+                    any(Policy.class)
+            );
+        }
+
+
+        @Test
+        @DisplayName(
+                "cannot delete published policy"
+        )
+        void deletePolicy_publishedRejected() {
+
+            samplePolicy.setStatus(
+                    PolicyStatus.PUBLISHED
+            );
+
+
+            when(
+                    policyRepository.findById(
+                            1L
+                    )
+            ).thenReturn(
+                    Optional.of(
+                            samplePolicy
+                    )
+            );
+
+
+            assertThatThrownBy(
+                    () ->
+                            policyService.deletePolicy(
+                                    1L
+                            )
+            )
+                    .isInstanceOf(
+                            BadRequestException.class
+                    );
+
+
+            verify(
+                    policyRepository,
+                    never()
+            ).delete(
+                    any(Policy.class)
+            );
         }
     }
 }

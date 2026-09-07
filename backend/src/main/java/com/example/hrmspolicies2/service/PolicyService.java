@@ -12,6 +12,8 @@ import com.example.hrmspolicies2.exception.*;
 import com.example.hrmspolicies2.repository.*;
 import com.example.hrmspolicies2.specification.PolicySpecification;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.*;
 import org.springframework.security.core.Authentication;
@@ -25,6 +27,15 @@ import java.util.stream.Collectors;
 
 @Service
 public class PolicyService {
+
+    // =========================================================
+    // STRUCTURED LOGGING
+    // =========================================================
+
+    private static final Logger log =
+            LoggerFactory.getLogger(
+                    PolicyService.class
+            );
 
     private static final Set<String> SORTABLE_FIELDS =
             Set.of(
@@ -72,12 +83,31 @@ public class PolicyService {
             String direction
     ) {
 
+        log.debug(
+                "event=POLICY_SEARCH_REQUEST categoryId={} status={} applicability={} mandatory={} page={} size={} sortBy={} direction={} searchPresent={}",
+                categoryId,
+                status,
+                applicability,
+                mandatory,
+                page,
+                size,
+                sortBy,
+                direction,
+                StringUtils.hasText(search)
+        );
+
         String safeSortField =
                 StringUtils.hasText(sortBy)
                         ? sortBy
                         : "updatedAt";
 
         if (!SORTABLE_FIELDS.contains(safeSortField)) {
+
+            log.warn(
+                    "event=POLICY_SEARCH_REJECTED reason=INVALID_SORT_FIELD sortField={}",
+                    safeSortField
+            );
+
             throw new BadRequestException(
                     "Invalid sorting field: "
                             + safeSortField
@@ -126,6 +156,15 @@ public class PolicyService {
                         this::mapToResponse
                 );
 
+        log.debug(
+                "event=POLICY_SEARCH_COMPLETED page={} size={} returned={} totalElements={} totalPages={}",
+                responses.getNumber(),
+                responses.getSize(),
+                responses.getNumberOfElements(),
+                responses.getTotalElements(),
+                responses.getTotalPages()
+        );
+
         return new PageResponse<>(
                 responses
         );
@@ -141,6 +180,11 @@ public class PolicyService {
             Long id
     ) {
 
+        log.debug(
+                "event=POLICY_GET_REQUEST policyId={}",
+                id
+        );
+
         Policy policy =
                 findPolicy(id);
 
@@ -152,10 +196,22 @@ public class PolicyService {
                 && policy.getStatus()
                 != PolicyStatus.PUBLISHED) {
 
+            log.warn(
+                    "event=POLICY_ACCESS_DENIED policyId={} status={} reason=NOT_PUBLISHED",
+                    id,
+                    policy.getStatus()
+            );
+
             throw new ForbiddenException(
                     "You cannot access this policy"
             );
         }
+
+        log.debug(
+                "event=POLICY_GET_SUCCESS policyId={} status={}",
+                policy.getId(),
+                policy.getStatus()
+        );
 
         return mapToResponse(
                 policy
@@ -177,12 +233,24 @@ public class PolicyService {
                         request.getCode()
                 );
 
+        log.info(
+                "event=POLICY_CREATE_REQUEST code={} applicability={} mandatory={}",
+                code,
+                request.getApplicability(),
+                request.getMandatory()
+        );
+
         validateApplicability(
                 request
         );
 
         if (policyRepository
                 .existsByCodeIgnoreCase(code)) {
+
+            log.warn(
+                    "event=POLICY_CREATE_REJECTED reason=DUPLICATE_CODE code={}",
+                    code
+            );
 
             throw new DuplicateResourceException(
                     "Policy code already exists: "
@@ -270,6 +338,14 @@ public class PolicyService {
                         policy
                 );
 
+        log.info(
+                "event=POLICY_CREATED policyId={} code={} status={} actorUserId={}",
+                saved.getId(),
+                saved.getCode(),
+                saved.getStatus(),
+                currentUser.getId()
+        );
+
         return mapToResponse(
                 saved
         );
@@ -286,6 +362,11 @@ public class PolicyService {
             PolicyRequest request
     ) {
 
+        log.info(
+                "event=POLICY_UPDATE_REQUEST policyId={}",
+                id
+        );
+
         Policy policy =
                 findPolicy(id);
 
@@ -300,6 +381,12 @@ public class PolicyService {
                 &&
                 policy.getStatus()
                         != PolicyStatus.REJECTED) {
+
+            log.warn(
+                    "event=POLICY_UPDATE_REJECTED policyId={} reason=INVALID_STATUS status={}",
+                    id,
+                    policy.getStatus()
+            );
 
             throw new BadRequestException(
                     "Only DRAFT or REJECTED policies can be edited"
@@ -326,6 +413,13 @@ public class PolicyService {
                 !policy.getCode()
                         .equals(requestedCode)) {
 
+            log.warn(
+                    "event=POLICY_UPDATE_REJECTED policyId={} reason=CODE_CHANGE_AFTER_PUBLICATION oldCode={} requestedCode={}",
+                    id,
+                    policy.getCode(),
+                    requestedCode
+            );
+
             throw new BadRequestException(
                     "Policy code cannot be changed after first publication"
             );
@@ -336,6 +430,12 @@ public class PolicyService {
                         requestedCode,
                         id
                 )) {
+
+            log.warn(
+                    "event=POLICY_UPDATE_REJECTED policyId={} reason=DUPLICATE_CODE requestedCode={}",
+                    id,
+                    requestedCode
+            );
 
             throw new DuplicateResourceException(
                     "Policy code already exists: "
@@ -409,6 +509,11 @@ public class PolicyService {
         if (policy.getStatus()
                 == PolicyStatus.REJECTED) {
 
+            log.info(
+                    "event=POLICY_REJECTED_RESET_TO_DRAFT policyId={}",
+                    id
+            );
+
             policy.setStatus(
                     PolicyStatus.DRAFT
             );
@@ -418,6 +523,13 @@ public class PolicyService {
                 policyRepository.save(
                         policy
                 );
+
+        log.info(
+                "event=POLICY_UPDATED policyId={} code={} status={}",
+                saved.getId(),
+                saved.getCode(),
+                saved.getStatus()
+        );
 
         return mapToResponse(
                 saved
@@ -434,6 +546,11 @@ public class PolicyService {
             Long id
     ) {
 
+        log.info(
+                "event=POLICY_DELETE_REQUEST policyId={}",
+                id
+        );
+
         Policy policy =
                 findPolicy(id);
 
@@ -446,6 +563,12 @@ public class PolicyService {
          */
         if (policy.getStatus()
                 != PolicyStatus.DRAFT) {
+
+            log.warn(
+                    "event=POLICY_DELETE_REJECTED policyId={} reason=INVALID_STATUS status={}",
+                    id,
+                    policy.getStatus()
+            );
 
             throw new BadRequestException(
                     "Only DRAFT policies can be deleted. " +
@@ -461,6 +584,11 @@ public class PolicyService {
         if (Boolean.TRUE.equals(
                 policy.getPublishedOnce()
         )) {
+
+            log.warn(
+                    "event=POLICY_DELETE_REJECTED policyId={} reason=PUBLICATION_HISTORY",
+                    id
+            );
 
             throw new BadRequestException(
                     "A policy with publication history " +
@@ -492,9 +620,21 @@ public class PolicyService {
              */
             policyRepository.flush();
 
+            log.info(
+                    "event=POLICY_DELETED policyId={} code={}",
+                    id,
+                    policy.getCode()
+            );
+
         } catch (
                 DataIntegrityViolationException exception
         ) {
+
+            log.error(
+                    "event=POLICY_DELETE_FAILED policyId={} reason=DATA_INTEGRITY",
+                    id,
+                    exception
+            );
 
             throw new BadRequestException(
                     "This policy cannot be deleted because " +
@@ -516,12 +656,19 @@ public class PolicyService {
         return policyRepository
                 .findById(id)
                 .orElseThrow(
-                        () ->
-                                ResourceNotFoundException
-                                        .forEntity(
-                                                "Policy",
-                                                id
-                                        )
+                        () -> {
+
+                            log.warn(
+                                    "event=POLICY_NOT_FOUND policyId={}",
+                                    id
+                            );
+
+                            return ResourceNotFoundException
+                                    .forEntity(
+                                            "Policy",
+                                            id
+                                    );
+                        }
                 );
     }
 
@@ -540,17 +687,29 @@ public class PolicyService {
                                 categoryId
                         )
                         .orElseThrow(
-                                () ->
-                                        ResourceNotFoundException
-                                                .forEntity(
-                                                        "PolicyCategory",
-                                                        categoryId
-                                                )
+                                () -> {
+
+                                    log.warn(
+                                            "event=POLICY_CATEGORY_NOT_FOUND categoryId={}",
+                                            categoryId
+                                    );
+
+                                    return ResourceNotFoundException
+                                            .forEntity(
+                                                    "PolicyCategory",
+                                                    categoryId
+                                            );
+                                }
                         );
 
         if (!Boolean.TRUE.equals(
                 category.getActive()
         )) {
+
+            log.warn(
+                    "event=POLICY_CATEGORY_REJECTED categoryId={} reason=INACTIVE_CATEGORY",
+                    categoryId
+            );
 
             throw new BadRequestException(
                     "Selected policy category is inactive"
@@ -581,6 +740,11 @@ public class PolicyService {
                                 .getApplicableDepartments()
                 )) {
 
+            log.warn(
+                    "event=POLICY_VALIDATION_FAILED reason=MISSING_DEPARTMENT applicability={}",
+                    request.getApplicability()
+            );
+
             throw new BadRequestException(
                     "Select at least one department " +
                             "for DEPT_BASED applicability"
@@ -598,6 +762,11 @@ public class PolicyService {
                         request
                                 .getApplicableGrades()
                 )) {
+
+            log.warn(
+                    "event=POLICY_VALIDATION_FAILED reason=MISSING_GRADE applicability={}",
+                    request.getApplicability()
+            );
 
             throw new BadRequestException(
                     "Select at least one grade " +
@@ -711,6 +880,10 @@ public class PolicyService {
 
         if (!StringUtils.hasText(code)) {
 
+            log.warn(
+                    "event=POLICY_VALIDATION_FAILED reason=MISSING_POLICY_CODE"
+            );
+
             throw new BadRequestException(
                     "Policy code is required"
             );
@@ -740,6 +913,10 @@ public class PolicyService {
                 !authentication
                         .isAuthenticated()) {
 
+            log.warn(
+                    "event=POLICY_AUTHENTICATION_FAILED reason=NO_AUTHENTICATED_USER"
+            );
+
             throw new UnauthorizedException(
                     "Authentication is required"
             );
@@ -750,10 +927,16 @@ public class PolicyService {
                         authentication.getName()
                 )
                 .orElseThrow(
-                        () ->
-                                new UnauthorizedException(
-                                        "Authenticated user was not found"
-                                )
+                        () -> {
+
+                            log.warn(
+                                    "event=POLICY_AUTHENTICATION_FAILED reason=USER_NOT_FOUND"
+                            );
+
+                            return new UnauthorizedException(
+                                    "Authenticated user was not found"
+                            );
+                        }
                 );
     }
 

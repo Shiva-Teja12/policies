@@ -13,6 +13,9 @@ import com.example.hrmspolicies2.exception.ResourceNotFoundException;
 import com.example.hrmspolicies2.repository.NotificationRepository;
 import com.example.hrmspolicies2.repository.PolicyAssignmentRepository;
 import com.example.hrmspolicies2.repository.PolicyRepository;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,9 +25,19 @@ import java.util.List;
 @Service
 public class PolicyRetirementService {
 
+    // =========================================================
+    // STRUCTURED LOGGING
+    // =========================================================
+
+    private static final Logger log =
+            LoggerFactory.getLogger(
+                    PolicyRetirementService.class
+            );
+
     private final PolicyRepository policyRepository;
     private final PolicyAssignmentRepository assignmentRepository;
     private final NotificationRepository notificationRepository;
+
 
     public PolicyRetirementService(
             PolicyRepository policyRepository,
@@ -41,24 +54,52 @@ public class PolicyRetirementService {
                 notificationRepository;
     }
 
+
+    // =========================================================
+    // RETIRE POLICY
+    // =========================================================
+
     @Transactional
     public PolicyRetirementResponse retire(
             Long policyId,
             RetirePolicyRequest request
     ) {
+
+        log.info(
+                "event=POLICY_RETIRE_REQUEST policyId={} retirementEffectiveDate={}",
+                policyId,
+                request.getRetirementEffectiveDate()
+        );
+
         Policy policy =
                 policyRepository
-                        .findByIdForUpdate(policyId)
-                        .orElseThrow(() ->
-                                ResourceNotFoundException
-                                        .forEntity(
-                                                "Policy",
-                                                policyId
-                                        )
+                        .findByIdForUpdate(
+                                policyId
+                        )
+                        .orElseThrow(
+                                () -> {
+
+                                    log.warn(
+                                            "event=POLICY_RETIRE_FAILED policyId={} reason=POLICY_NOT_FOUND",
+                                            policyId
+                                    );
+
+                                    return ResourceNotFoundException
+                                            .forEntity(
+                                                    "Policy",
+                                                    policyId
+                                            );
+                                }
                         );
 
         if (policy.getStatus()
                 == PolicyStatus.RETIRED) {
+
+            log.warn(
+                    "event=POLICY_RETIRE_REJECTED policyId={} reason=ALREADY_RETIRED",
+                    policyId
+            );
+
             throw new BadRequestException(
                     "This policy is already retired"
             );
@@ -66,6 +107,13 @@ public class PolicyRetirementService {
 
         if (policy.getStatus()
                 != PolicyStatus.PUBLISHED) {
+
+            log.warn(
+                    "event=POLICY_RETIRE_REJECTED policyId={} reason=INVALID_STATUS status={}",
+                    policyId,
+                    policy.getStatus()
+            );
+
             throw new BadRequestException(
                     "Only a PUBLISHED policy can be retired"
             );
@@ -76,14 +124,23 @@ public class PolicyRetirementService {
         );
 
         policy.setRetirementReason(
-                request.getReason().trim()
+                request.getReason()
+                        .trim()
         );
 
         policy.setRetirementEffectiveDate(
                 request.getRetirementEffectiveDate()
         );
 
-        policyRepository.save(policy);
+        policyRepository.save(
+                policy
+        );
+
+        log.info(
+                "event=POLICY_STATUS_CHANGED policyId={} newStatus={}",
+                policyId,
+                policy.getStatus()
+        );
 
         List<PolicyAssignment> openAssignments =
                 assignmentRepository
@@ -95,8 +152,15 @@ public class PolicyRetirementService {
                                 )
                         );
 
+        log.info(
+                "event=POLICY_RETIRE_OPEN_ASSIGNMENTS_FOUND policyId={} openAssignments={}",
+                policyId,
+                openAssignments.size()
+        );
+
         for (PolicyAssignment assignment :
                 openAssignments) {
+
             assignment.setStatus(
                     AssignmentStatus.CANCELLED
             );
@@ -106,11 +170,14 @@ public class PolicyRetirementService {
             );
 
             notificationRepository.save(
-                    Notification.builder()
+                    Notification
+                            .builder()
                             .recipient(
                                     assignment.getEmployee()
                             )
-                            .policy(policy)
+                            .policy(
+                                    policy
+                            )
                             .title(
                                     "Policy retired"
                             )
@@ -126,29 +193,55 @@ public class PolicyRetirementService {
                             )
                             .build()
             );
+
+            log.debug(
+                    "event=POLICY_ASSIGNMENT_CANCELLED policyId={} assignmentId={} employeeId={}",
+                    policyId,
+                    assignment.getId(),
+                    assignment.getEmployee()
+                            .getId()
+            );
         }
+
+        log.info(
+                "event=POLICY_RETIRED policyId={} status={} cancelledAssignments={} retirementEffectiveDate={}",
+                policy.getId(),
+                policy.getStatus(),
+                openAssignments.size(),
+                policy.getRetirementEffectiveDate()
+        );
 
         return PolicyRetirementResponse
                 .builder()
-                .policyId(policy.getId())
+
+                .policyId(
+                        policy.getId()
+                )
+
                 .policyCode(
                         policy.getCode()
                 )
+
                 .policyName(
                         policy.getName()
                 )
+
                 .status(
                         policy.getStatus()
                 )
+
                 .retirementReason(
                         policy.getRetirementReason()
                 )
+
                 .retirementEffectiveDate(
                         policy.getRetirementEffectiveDate()
                 )
+
                 .cancelledAssignments(
                         (long) openAssignments.size()
                 )
+
                 .build();
     }
 }

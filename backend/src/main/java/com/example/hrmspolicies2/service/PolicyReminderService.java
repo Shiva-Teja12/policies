@@ -5,6 +5,7 @@ import com.example.hrmspolicies2.enums.*;
 import com.example.hrmspolicies2.notification.EmailDeliveryResult;
 import com.example.hrmspolicies2.notification.PolicyEmailService;
 import com.example.hrmspolicies2.repository.*;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -22,6 +23,10 @@ import java.util.Optional;
 @Service
 public class PolicyReminderService {
 
+    // =========================================================
+    // STRUCTURED LOGGING
+    // =========================================================
+
     private static final Logger log =
             LoggerFactory.getLogger(
                     PolicyReminderService.class
@@ -33,6 +38,7 @@ public class PolicyReminderService {
     private final NotificationRepository notificationRepository;
     private final UserRepository userRepository;
     private final PolicyEmailService emailService;
+
 
     public PolicyReminderService(
             PolicyAssignmentRepository assignmentRepository,
@@ -61,12 +67,23 @@ public class PolicyReminderService {
                 emailService;
     }
 
+
+    // =========================================================
+    // PROCESS DAILY REMINDERS
+    // =========================================================
+
     @Transactional
     public void processDailyReminders() {
+
         LocalDate today =
                 LocalDate.now(
                         ZoneOffset.UTC
                 );
+
+        log.info(
+                "event=POLICY_REMINDER_JOB_STARTED date={}",
+                today
+        );
 
         List<PolicyAssignment> overdueAssignments =
                 assignmentRepository
@@ -79,31 +96,58 @@ public class PolicyReminderService {
                         );
 
         log.info(
-                "Processing {} overdue policy assignments",
+                "event=POLICY_REMINDER_OVERDUE_ASSIGNMENTS_FOUND date={} count={}",
+                today,
                 overdueAssignments.size()
         );
 
+        int processedCount = 0;
+
         for (PolicyAssignment assignment :
                 overdueAssignments) {
+
             processAssignment(
                     assignment,
                     today
             );
+
+            processedCount++;
         }
+
+        log.info(
+                "event=POLICY_REMINDER_JOB_COMPLETED date={} processedAssignments={}",
+                today,
+                processedCount
+        );
     }
+
+
+    // =========================================================
+    // PROCESS SINGLE ASSIGNMENT
+    // =========================================================
 
     private void processAssignment(
             PolicyAssignment assignment,
             LocalDate today
     ) {
+
         PolicyVersion version =
                 assignment.getPolicyVersion();
 
         if (!Boolean.TRUE.equals(
                 version.getCurrentVersion()
         )) {
+
+            log.debug(
+                    "event=POLICY_REMINDER_SKIPPED assignmentId={} policyId={} reason=NOT_CURRENT_VERSION",
+                    assignment.getId(),
+                    assignment.getPolicy()
+                            .getId()
+            );
+
             return;
         }
+
 
         if (acknowledgementRepository
                 .existsByEmployee_IdAndPolicyVersion_Id(
@@ -111,6 +155,7 @@ public class PolicyReminderService {
                                 .getId(),
                         version.getId()
                 )) {
+
             assignment.setStatus(
                     AssignmentStatus.ACKNOWLEDGED
             );
@@ -119,8 +164,18 @@ public class PolicyReminderService {
                     assignment
             );
 
+            log.info(
+                    "event=POLICY_REMINDER_ASSIGNMENT_ACKNOWLEDGED assignmentId={} policyId={} employeeId={}",
+                    assignment.getId(),
+                    assignment.getPolicy()
+                            .getId(),
+                    assignment.getEmployee()
+                            .getId()
+            );
+
             return;
         }
+
 
         long daysOverdue =
                 ChronoUnit.DAYS.between(
@@ -128,23 +183,52 @@ public class PolicyReminderService {
                         today
                 );
 
+
         Optional<ReminderStage> stage =
-                determineStage(daysOverdue);
+                determineStage(
+                        daysOverdue
+                );
+
 
         if (stage.isEmpty()) {
+
+            log.debug(
+                    "event=POLICY_REMINDER_SKIPPED assignmentId={} policyId={} employeeId={} reason=NO_REMINDER_STAGE daysOverdue={}",
+                    assignment.getId(),
+                    assignment.getPolicy()
+                            .getId(),
+                    assignment.getEmployee()
+                            .getId(),
+                    daysOverdue
+            );
+
             return;
         }
 
+
         ReminderStage reminderStage =
                 stage.get();
+
 
         if (reminderLogRepository
                 .existsByAssignment_IdAndReminderStage(
                         assignment.getId(),
                         reminderStage
                 )) {
+
+            log.debug(
+                    "event=POLICY_REMINDER_SKIPPED assignmentId={} policyId={} employeeId={} stage={} reason=ALREADY_SENT",
+                    assignment.getId(),
+                    assignment.getPolicy()
+                            .getId(),
+                    assignment.getEmployee()
+                            .getId(),
+                    reminderStage
+            );
+
             return;
         }
+
 
         assignment.setStatus(
                 AssignmentStatus.OVERDUE
@@ -154,6 +238,19 @@ public class PolicyReminderService {
                 assignment
         );
 
+
+        log.info(
+                "event=POLICY_REMINDER_DUE assignmentId={} policyId={} employeeId={} stage={} daysOverdue={}",
+                assignment.getId(),
+                assignment.getPolicy()
+                        .getId(),
+                assignment.getEmployee()
+                        .getId(),
+                reminderStage,
+                daysOverdue
+        );
+
+
         deliverReminder(
                 assignment,
                 reminderStage,
@@ -161,9 +258,18 @@ public class PolicyReminderService {
         );
     }
 
+
+    // =========================================================
+    // DETERMINE REMINDER STAGE
+    // =========================================================
+
     private Optional<ReminderStage>
-    determineStage(long daysOverdue) {
+    determineStage(
+            long daysOverdue
+    ) {
+
         if (daysOverdue >= 14) {
+
             return Optional.of(
                     ReminderStage
                             .DAY_14_HR_HEAD_ESCALATION
@@ -171,6 +277,7 @@ public class PolicyReminderService {
         }
 
         if (daysOverdue >= 10) {
+
             return Optional.of(
                     ReminderStage
                             .DAY_10_MANAGER_CC
@@ -178,6 +285,7 @@ public class PolicyReminderService {
         }
 
         if (daysOverdue >= 7) {
+
             return Optional.of(
                     ReminderStage
                             .DAY_7_SECOND_REMINDER
@@ -185,6 +293,7 @@ public class PolicyReminderService {
         }
 
         if (daysOverdue >= 3) {
+
             return Optional.of(
                     ReminderStage
                             .DAY_3_FIRST_REMINDER
@@ -194,11 +303,17 @@ public class PolicyReminderService {
         return Optional.empty();
     }
 
+
+    // =========================================================
+    // DELIVER REMINDER
+    // =========================================================
+
     private void deliverReminder(
             PolicyAssignment assignment,
             ReminderStage stage,
             long daysOverdue
     ) {
+
         User employee =
                 assignment.getEmployee();
 
@@ -210,34 +325,55 @@ public class PolicyReminderService {
 
         String cc = null;
 
+
         if (stage
                 == ReminderStage
                 .DAY_10_MANAGER_CC
                 && StringUtils.hasText(
                 employee.getManagerEmail()
         )) {
-            cc = employee.getManagerEmail();
+
+            cc =
+                    employee.getManagerEmail();
         }
+
 
         if (stage
                 == ReminderStage
                 .DAY_14_HR_HEAD_ESCALATION) {
+
             List<User> hrHeads =
                     userRepository.findByRole(
                             Role.HR_HEAD
                     );
 
             if (!hrHeads.isEmpty()) {
+
                 recipient =
                         hrHeads.get(0)
                                 .getEmail();
 
-                cc = employee.getEmail();
+                cc =
+                        employee.getEmail();
+
+            } else {
+
+                log.warn(
+                        "event=POLICY_REMINDER_ESCALATION_FALLBACK assignmentId={} policyId={} employeeId={} reason=HR_HEAD_NOT_FOUND",
+                        assignment.getId(),
+                        policy.getId(),
+                        employee.getId()
+                );
             }
         }
 
+
         String subject =
-                subjectFor(stage, policy);
+                subjectFor(
+                        stage,
+                        policy
+                );
+
 
         String body =
                 bodyFor(
@@ -248,6 +384,20 @@ public class PolicyReminderService {
                         daysOverdue
                 );
 
+
+        log.info(
+                "event=POLICY_REMINDER_SEND_REQUEST assignmentId={} policyId={} employeeId={} stage={} daysOverdue={} hasCc={}",
+                assignment.getId(),
+                policy.getId(),
+                employee.getId(),
+                stage,
+                daysOverdue,
+                StringUtils.hasText(
+                        cc
+                )
+        );
+
+
         EmailDeliveryResult deliveryResult =
                 emailService.send(
                         recipient,
@@ -256,26 +406,37 @@ public class PolicyReminderService {
                         body
                 );
 
+
         NotificationStatus deliveryStatus =
                 deliveryResult.successful()
                         ? NotificationStatus.SENT
                         : NotificationStatus.FAILED;
 
+
         reminderLogRepository.save(
-                ReminderLog.builder()
+                ReminderLog
+                        .builder()
                         .assignment(
                                 assignment
                         )
-                        .employee(employee)
-                        .policy(policy)
-                        .reminderStage(stage)
+                        .employee(
+                                employee
+                        )
+                        .policy(
+                                policy
+                        )
+                        .reminderStage(
+                                stage
+                        )
                         .deliveryStatus(
                                 deliveryStatus
                         )
                         .recipientEmail(
                                 recipient
                         )
-                        .ccEmail(cc)
+                        .ccEmail(
+                                cc
+                        )
                         .sentAt(
                                 LocalDateTime.now(
                                         ZoneOffset.UTC
@@ -288,8 +449,10 @@ public class PolicyReminderService {
                         .build()
         );
 
+
         notificationRepository.save(
-                Notification.builder()
+                Notification
+                        .builder()
                         .recipient(
                                 stage
                                         == ReminderStage
@@ -299,9 +462,15 @@ public class PolicyReminderService {
                                 )
                                         : employee
                         )
-                        .policy(policy)
-                        .title(subject)
-                        .message(body)
+                        .policy(
+                                policy
+                        )
+                        .title(
+                                subject
+                        )
+                        .message(
+                                body
+                        )
                         .status(
                                 deliveryStatus
                         )
@@ -315,23 +484,64 @@ public class PolicyReminderService {
                         )
                         .build()
         );
+
+
+        if (deliveryResult.successful()) {
+
+            log.info(
+                    "event=POLICY_REMINDER_SENT assignmentId={} policyId={} employeeId={} stage={} deliveryStatus={}",
+                    assignment.getId(),
+                    policy.getId(),
+                    employee.getId(),
+                    stage,
+                    deliveryStatus
+            );
+
+        } else {
+
+            log.warn(
+                    "event=POLICY_REMINDER_DELIVERY_FAILED assignmentId={} policyId={} employeeId={} stage={} deliveryStatus={}",
+                    assignment.getId(),
+                    policy.getId(),
+                    employee.getId(),
+                    stage,
+                    deliveryStatus
+            );
+        }
     }
+
+
+    // =========================================================
+    // FIND HR HEAD OR FALL BACK TO EMPLOYEE
+    // =========================================================
 
     private User findHrHeadOrEmployee(
             User employee
     ) {
+
         return userRepository
-                .findByRole(Role.HR_HEAD)
+                .findByRole(
+                        Role.HR_HEAD
+                )
                 .stream()
                 .findFirst()
-                .orElse(employee);
+                .orElse(
+                        employee
+                );
     }
+
+
+    // =========================================================
+    // EMAIL SUBJECT
+    // =========================================================
 
     private String subjectFor(
             ReminderStage stage,
             Policy policy
     ) {
+
         return switch (stage) {
+
             case DAY_3_FIRST_REMINDER ->
                     "Policy acknowledgement reminder: "
                             + policy.getCode();
@@ -349,6 +559,11 @@ public class PolicyReminderService {
         };
     }
 
+
+    // =========================================================
+    // EMAIL BODY
+    // =========================================================
+
     private String bodyFor(
             ReminderStage stage,
             User employee,
@@ -356,6 +571,7 @@ public class PolicyReminderService {
             PolicyAssignment assignment,
             long daysOverdue
     ) {
+
         String base =
                 "Employee: "
                         + employee.getName()
@@ -371,7 +587,9 @@ public class PolicyReminderService {
                         + "\nDays overdue: "
                         + daysOverdue;
 
+
         return switch (stage) {
+
             case DAY_3_FIRST_REMINDER ->
                     "This is the first reminder to acknowledge the policy.\n\n"
                             + base;

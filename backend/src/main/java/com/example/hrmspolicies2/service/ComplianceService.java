@@ -7,6 +7,10 @@ import com.example.hrmspolicies2.enums.PolicyStatus;
 import com.example.hrmspolicies2.enums.Role;
 import com.example.hrmspolicies2.exception.BadRequestException;
 import com.example.hrmspolicies2.repository.*;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.springframework.data.domain.PageImpl;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,6 +26,15 @@ import java.util.stream.Collectors;
 
 @Service
 public class ComplianceService {
+
+    // =========================================================
+    // STRUCTURED LOGGING
+    // =========================================================
+
+    private static final Logger log =
+            LoggerFactory.getLogger(
+                    ComplianceService.class
+            );
 
     private static final Set<String>
             SORTABLE_FIELDS = Set.of(
@@ -41,6 +54,7 @@ public class ComplianceService {
     private final PolicyAcknowledgementRepository acknowledgementRepository;
     private final UserRepository userRepository;
 
+
     public ComplianceService(
             PolicyRepository policyRepository,
             PolicyVersionRepository versionRepository,
@@ -48,12 +62,26 @@ public class ComplianceService {
             PolicyAcknowledgementRepository acknowledgementRepository,
             UserRepository userRepository
     ) {
-        this.policyRepository = policyRepository;
-        this.versionRepository = versionRepository;
-        this.assignmentRepository = assignmentRepository;
-        this.acknowledgementRepository = acknowledgementRepository;
-        this.userRepository = userRepository;
+        this.policyRepository =
+                policyRepository;
+
+        this.versionRepository =
+                versionRepository;
+
+        this.assignmentRepository =
+                assignmentRepository;
+
+        this.acknowledgementRepository =
+                acknowledgementRepository;
+
+        this.userRepository =
+                userRepository;
     }
+
+
+    // =========================================================
+    // COMPLIANCE DASHBOARD
+    // =========================================================
 
     @Transactional(readOnly = true)
     public PageResponse<PolicyComplianceResponse>
@@ -70,26 +98,63 @@ public class ComplianceService {
             String sortBy,
             String direction
     ) {
-        validateDates(fromDate, toDate);
+
+        log.debug(
+                "event=COMPLIANCE_DASHBOARD_REQUEST policyId={} categoryId={} departmentPresent={} mandatory={} fromDate={} toDate={} page={} size={} sortBy={} direction={} searchPresent={}",
+                policyId,
+                categoryId,
+                StringUtils.hasText(department),
+                mandatory,
+                fromDate,
+                toDate,
+                page,
+                size,
+                sortBy,
+                direction,
+                StringUtils.hasText(search)
+        );
+
+        validateDates(
+                fromDate,
+                toDate
+        );
+
 
         String safeSortBy =
-                StringUtils.hasText(sortBy)
+                StringUtils.hasText(
+                        sortBy
+                )
                         ? sortBy
                         : "policyName";
+
 
         if (!SORTABLE_FIELDS.contains(
                 safeSortBy
         )) {
+
+            log.warn(
+                    "event=COMPLIANCE_DASHBOARD_REJECTED reason=INVALID_SORT_FIELD sortBy={}",
+                    safeSortBy
+            );
+
             throw new BadRequestException(
                     "Invalid compliance sorting field: "
                             + safeSortBy
             );
         }
 
+
         List<User> employees =
                 userRepository.findByRole(
                         Role.EMPLOYEE
                 );
+
+
+        log.debug(
+                "event=COMPLIANCE_EMPLOYEES_LOADED employeeCount={}",
+                employees.size()
+        );
+
 
         List<PolicyComplianceResponse> results =
                 policyRepository
@@ -97,25 +162,29 @@ public class ComplianceService {
                                 PolicyStatus.PUBLISHED
                         )
                         .stream()
-                        .filter(policy ->
-                                matchesPolicyFilters(
-                                        policy,
-                                        search,
-                                        policyId,
-                                        categoryId,
-                                        mandatory,
-                                        fromDate,
-                                        toDate
-                                )
+                        .filter(
+                                policy ->
+                                        matchesPolicyFilters(
+                                                policy,
+                                                search,
+                                                policyId,
+                                                categoryId,
+                                                mandatory,
+                                                fromDate,
+                                                toDate
+                                        )
                         )
-                        .map(policy ->
-                                calculatePolicyCompliance(
-                                        policy,
-                                        employees,
-                                        department
-                                )
+                        .map(
+                                policy ->
+                                        calculatePolicyCompliance(
+                                                policy,
+                                                employees,
+                                                department
+                                        )
                         )
-                        .filter(Objects::nonNull)
+                        .filter(
+                                Objects::nonNull
+                        )
                         .sorted(
                                 complianceComparator(
                                         safeSortBy,
@@ -124,23 +193,42 @@ public class ComplianceService {
                         )
                         .toList();
 
-        int safePage = Math.max(page, 0);
-        int safeSize = Math.min(
-                Math.max(size, 1),
-                100
-        );
 
-        int start = Math.min(
-                safePage * safeSize,
-                results.size()
-        );
+        int safePage =
+                Math.max(
+                        page,
+                        0
+                );
 
-        int end = Math.min(
-                start + safeSize,
-                results.size()
-        );
 
-        PageImpl<PolicyComplianceResponse> resultPage =
+        int safeSize =
+                Math.min(
+                        Math.max(
+                                size,
+                                1
+                        ),
+                        100
+                );
+
+
+        int start =
+                Math.min(
+                        safePage
+                                * safeSize,
+                        results.size()
+                );
+
+
+        int end =
+                Math.min(
+                        start
+                                + safeSize,
+                        results.size()
+                );
+
+
+        PageImpl<PolicyComplianceResponse>
+                resultPage =
                 new PageImpl<>(
                         results.subList(
                                 start,
@@ -154,8 +242,25 @@ public class ComplianceService {
                         results.size()
                 );
 
-        return new PageResponse<>(resultPage);
+
+        log.debug(
+                "event=COMPLIANCE_DASHBOARD_COMPLETED totalPolicies={} returnedPolicies={} page={} size={}",
+                results.size(),
+                resultPage.getNumberOfElements(),
+                safePage,
+                safeSize
+        );
+
+
+        return new PageResponse<>(
+                resultPage
+        );
     }
+
+
+    // =========================================================
+    // EXPORT COMPLIANCE CSV
+    // =========================================================
 
     @Transactional(readOnly = true)
     public byte[] exportCsv(
@@ -167,6 +272,19 @@ public class ComplianceService {
             LocalDate fromDate,
             LocalDate toDate
     ) {
+
+        log.info(
+                "event=COMPLIANCE_CSV_EXPORT_REQUEST policyId={} categoryId={} departmentPresent={} mandatory={} fromDate={} toDate={} searchPresent={}",
+                policyId,
+                categoryId,
+                StringUtils.hasText(department),
+                mandatory,
+                fromDate,
+                toDate,
+                StringUtils.hasText(search)
+        );
+
+
         PageResponse<PolicyComplianceResponse> result =
                 getComplianceDashboard(
                         search,
@@ -182,8 +300,10 @@ public class ComplianceService {
                         "asc"
                 );
 
+
         StringBuilder csv =
                 new StringBuilder();
+
 
         csv.append(
                 "Policy Code,Policy Name,Category,"
@@ -192,8 +312,10 @@ public class ComplianceService {
                         + "Pending,Overdue,Completion Percentage\n"
         );
 
+
         for (PolicyComplianceResponse row :
                 result.getContent()) {
+
             csv.append(
                     escapeCsv(
                             row.getPolicyCode()
@@ -249,11 +371,29 @@ public class ComplianceService {
             ).append("\n");
         }
 
-        return csv.toString()
-                .getBytes(
-                        StandardCharsets.UTF_8
-                );
+
+        byte[] csvBytes =
+                csv.toString()
+                        .getBytes(
+                                StandardCharsets.UTF_8
+                        );
+
+
+        log.info(
+                "event=COMPLIANCE_CSV_EXPORT_COMPLETED rowCount={} byteSize={}",
+                result.getContent()
+                        .size(),
+                csvBytes.length
+        );
+
+
+        return csvBytes;
     }
+
+
+    // =========================================================
+    // CALCULATE POLICY COMPLIANCE
+    // =========================================================
 
     private PolicyComplianceResponse
     calculatePolicyCompliance(
@@ -261,51 +401,74 @@ public class ComplianceService {
             List<User> allEmployees,
             String departmentFilter
     ) {
+
         PolicyVersion currentVersion =
                 versionRepository
                         .findByPolicy_IdAndCurrentVersionTrue(
                                 policy.getId()
                         )
-                        .orElse(null);
+                        .orElse(
+                                null
+                        );
+
 
         if (currentVersion == null) {
+
+            log.debug(
+                    "event=COMPLIANCE_POLICY_SKIPPED policyId={} reason=CURRENT_VERSION_NOT_FOUND",
+                    policy.getId()
+            );
+
             return null;
         }
 
+
         List<User> applicableEmployees =
-                allEmployees.stream()
-                        .filter(employee ->
-                                isApplicable(
-                                        policy,
-                                        employee
-                                )
-                        )
-                        .filter(employee ->
-                                !StringUtils.hasText(
-                                        departmentFilter
-                                )
-                                        || departmentFilter
-                                        .equalsIgnoreCase(
-                                                employee.getDepartment()
+                allEmployees
+                        .stream()
+                        .filter(
+                                employee ->
+                                        isApplicable(
+                                                policy,
+                                                employee
                                         )
                         )
+                        .filter(
+                                employee ->
+                                        !StringUtils.hasText(
+                                                departmentFilter
+                                        )
+                                                ||
+                                                departmentFilter
+                                                        .equalsIgnoreCase(
+                                                                employee.getDepartment()
+                                                        )
+                        )
                         .toList();
+
 
         LocalDate today =
                 LocalDate.now(
                         ZoneOffset.UTC
                 );
 
-        long acknowledgedCount = 0;
-        long overdueCount = 0;
+
+        long acknowledgedCount =
+                0;
+
+        long overdueCount =
+                0;
+
 
         List<OverdueEmployeeResponse>
                 overdueEmployees =
                 new ArrayList<>();
 
+
         Map<String, List<User>>
                 employeesByDepartment =
-                applicableEmployees.stream()
+                applicableEmployees
+                        .stream()
                         .collect(
                                 Collectors.groupingBy(
                                         employee ->
@@ -318,8 +481,10 @@ public class ComplianceService {
                                 )
                         );
 
+
         for (User employee :
                 applicableEmployees) {
+
             boolean acknowledged =
                     acknowledgementRepository
                             .existsByEmployee_IdAndPolicyVersion_Id(
@@ -327,10 +492,14 @@ public class ComplianceService {
                                     currentVersion.getId()
                             );
 
+
             if (acknowledged) {
+
                 acknowledgedCount++;
+
                 continue;
             }
+
 
             PolicyAssignment assignment =
                     assignmentRepository
@@ -338,32 +507,44 @@ public class ComplianceService {
                                     employee.getId(),
                                     currentVersion.getId()
                             )
-                            .orElse(null);
+                            .orElse(
+                                    null
+                            );
+
 
             if (assignment != null
-                    && today.isAfter(
-                    assignment.getDeadline()
-            )) {
+                    &&
+                    today.isAfter(
+                            assignment.getDeadline()
+                    )) {
+
                 overdueCount++;
+
 
                 overdueEmployees.add(
                         OverdueEmployeeResponse
                                 .builder()
+
                                 .employeeId(
                                         employee.getId()
                                 )
+
                                 .employeeName(
                                         employee.getName()
                                 )
+
                                 .employeeEmail(
                                         employee.getEmail()
                                 )
+
                                 .department(
                                         employee.getDepartment()
                                 )
+
                                 .deadline(
                                         assignment.getDeadline()
                                 )
+
                                 .daysOverdue(
                                         ChronoUnit.DAYS
                                                 .between(
@@ -371,17 +552,21 @@ public class ComplianceService {
                                                         today
                                                 )
                                 )
+
                                 .build()
                 );
             }
         }
 
+
         long totalApplicable =
                 applicableEmployees.size();
+
 
         long pending =
                 totalApplicable
                         - acknowledgedCount;
+
 
         double percentage =
                 totalApplicable == 0
@@ -390,18 +575,20 @@ public class ComplianceService {
                         * 100.0
                         / totalApplicable;
 
+
         List<DepartmentComplianceResponse>
                 departmentBreakdown =
                 employeesByDepartment
                         .entrySet()
                         .stream()
-                        .map(entry ->
-                                calculateDepartment(
-                                        entry.getKey(),
-                                        entry.getValue(),
-                                        currentVersion,
-                                        today
-                                )
+                        .map(
+                                entry ->
+                                        calculateDepartment(
+                                                entry.getKey(),
+                                                entry.getValue(),
+                                                currentVersion,
+                                                today
+                                        )
                         )
                         .sorted(
                                 Comparator.comparing(
@@ -412,6 +599,7 @@ public class ComplianceService {
                         )
                         .toList();
 
+
         overdueEmployees.sort(
                 Comparator.comparing(
                         OverdueEmployeeResponse
@@ -419,62 +607,101 @@ public class ComplianceService {
                 ).reversed()
         );
 
+
+        log.debug(
+                "event=COMPLIANCE_POLICY_CALCULATED policyId={} versionId={} totalApplicable={} acknowledged={} pending={} overdue={} completionPercentage={}",
+                policy.getId(),
+                currentVersion.getId(),
+                totalApplicable,
+                acknowledgedCount,
+                pending,
+                overdueCount,
+                roundPercentage(
+                        percentage
+                )
+        );
+
+
         return PolicyComplianceResponse
                 .builder()
-                .policyId(policy.getId())
+
+                .policyId(
+                        policy.getId()
+                )
+
                 .policyCode(
                         policy.getCode()
                 )
+
                 .policyName(
                         policy.getName()
                 )
+
                 .categoryId(
                         policy.getCategory()
                                 .getId()
                 )
+
                 .categoryName(
                         policy.getCategory()
                                 .getName()
                 )
+
                 .mandatory(
                         policy.getMandatory()
                 )
+
                 .policyVersionId(
                         currentVersion.getId()
                 )
+
                 .currentVersion(
                         currentVersion
                                 .getVersionNumber()
                 )
+
                 .effectiveDate(
                         currentVersion
                                 .getEffectiveDate()
                 )
+
                 .totalApplicableEmployees(
                         totalApplicable
                 )
+
                 .acknowledgedEmployees(
                         acknowledgedCount
                 )
+
                 .pendingEmployees(
                         pending
                 )
+
                 .overdueEmployees(
                         overdueCount
                 )
+
                 .completionPercentage(
                         roundPercentage(
                                 percentage
                         )
                 )
+
                 .departmentBreakdown(
                         departmentBreakdown
                 )
+
                 .overdueEmployeeList(
                         overdueEmployees
                 )
+
                 .build();
     }
+
+
+    // =========================================================
+    // CALCULATE DEPARTMENT COMPLIANCE
+    // =========================================================
 
     private DepartmentComplianceResponse
     calculateDepartment(
@@ -483,10 +710,17 @@ public class ComplianceService {
             PolicyVersion version,
             LocalDate today
     ) {
-        long acknowledged = 0;
-        long overdue = 0;
 
-        for (User employee : employees) {
+        long acknowledged =
+                0;
+
+        long overdue =
+                0;
+
+
+        for (User employee :
+                employees) {
+
             boolean hasAcknowledged =
                     acknowledgementRepository
                             .existsByEmployee_IdAndPolicyVersion_Id(
@@ -494,10 +728,14 @@ public class ComplianceService {
                                     version.getId()
                             );
 
+
             if (hasAcknowledged) {
+
                 acknowledged++;
+
                 continue;
             }
+
 
             PolicyAssignment assignment =
                     assignmentRepository
@@ -505,18 +743,30 @@ public class ComplianceService {
                                     employee.getId(),
                                     version.getId()
                             )
-                            .orElse(null);
+                            .orElse(
+                                    null
+                            );
+
 
             if (assignment != null
-                    && today.isAfter(
-                    assignment.getDeadline()
-            )) {
+                    &&
+                    today.isAfter(
+                            assignment.getDeadline()
+                    )) {
+
                 overdue++;
             }
         }
 
-        long total = employees.size();
-        long pending = total - acknowledged;
+
+        long total =
+                employees.size();
+
+
+        long pending =
+                total
+                        - acknowledged;
+
 
         double percentage =
                 total == 0
@@ -525,28 +775,43 @@ public class ComplianceService {
                         * 100.0
                         / total;
 
+
         return DepartmentComplianceResponse
                 .builder()
-                .department(department)
+
+                .department(
+                        department
+                )
+
                 .totalApplicableEmployees(
                         total
                 )
+
                 .acknowledgedEmployees(
                         acknowledged
                 )
+
                 .pendingEmployees(
                         pending
                 )
+
                 .overdueEmployees(
                         overdue
                 )
+
                 .completionPercentage(
                         roundPercentage(
                                 percentage
                         )
                 )
+
                 .build();
     }
+
+
+    // =========================================================
+    // POLICY FILTERS
+    // =========================================================
 
     private boolean matchesPolicyFilters(
             Policy policy,
@@ -557,84 +822,132 @@ public class ComplianceService {
             LocalDate fromDate,
             LocalDate toDate
     ) {
+
         if (policyId != null
-                && !policy.getId()
-                .equals(policyId)) {
+                &&
+                !policy.getId()
+                        .equals(
+                                policyId
+                        )) {
+
             return false;
         }
+
 
         if (categoryId != null
-                && !policy.getCategory()
-                .getId()
-                .equals(categoryId)) {
+                &&
+                !policy.getCategory()
+                        .getId()
+                        .equals(
+                                categoryId
+                        )) {
+
             return false;
         }
+
 
         if (mandatory != null
-                && !policy.getMandatory()
-                .equals(mandatory)) {
+                &&
+                !policy.getMandatory()
+                        .equals(
+                                mandatory
+                        )) {
+
             return false;
         }
 
-        if (StringUtils.hasText(search)) {
+
+        if (StringUtils.hasText(
+                search
+        )) {
+
             String keyword =
                     search.trim()
                             .toLowerCase(
                                     Locale.ROOT
                             );
 
+
             boolean matches =
                     policy.getName()
                             .toLowerCase(
                                     Locale.ROOT
                             )
-                            .contains(keyword)
-                            || policy.getCode()
-                            .toLowerCase(
-                                    Locale.ROOT
+                            .contains(
+                                    keyword
                             )
-                            .contains(keyword);
+                            ||
+                            policy.getCode()
+                                    .toLowerCase(
+                                            Locale.ROOT
+                                    )
+                                    .contains(
+                                            keyword
+                                    );
+
 
             if (!matches) {
+
                 return false;
             }
         }
 
+
         if (fromDate != null
-                && (
-                policy.getEffectiveDate()
-                        == null
-                        || policy.getEffectiveDate()
-                        .isBefore(fromDate)
-        )) {
+                &&
+                (
+                        policy.getEffectiveDate()
+                                == null
+                                ||
+                                policy.getEffectiveDate()
+                                        .isBefore(
+                                                fromDate
+                                        )
+                )) {
+
             return false;
         }
 
+
         return toDate == null
-                || (
-                policy.getEffectiveDate()
-                        != null
-                        && !policy.getEffectiveDate()
-                        .isAfter(toDate)
-        );
+                ||
+                (
+                        policy.getEffectiveDate()
+                                != null
+                                &&
+                                !policy.getEffectiveDate()
+                                        .isAfter(
+                                                toDate
+                                        )
+                );
     }
+
+
+    // =========================================================
+    // POLICY APPLICABILITY
+    // =========================================================
 
     private boolean isApplicable(
             Policy policy,
             User employee
     ) {
+
         if (policy.getApplicability()
                 == Applicability.ALL) {
+
             return true;
         }
 
+
         if (policy.getApplicability()
                 == Applicability.DEPT_BASED) {
+
             return containsValue(
                     policy.getApplicableDepartments(),
                     employee.getDepartment()
             );
         }
+
 
         return containsValue(
                 policy.getApplicableGrades(),
@@ -642,36 +955,60 @@ public class ComplianceService {
         );
     }
 
+
+    // =========================================================
+    // VALUE MATCHING
+    // =========================================================
+
     private boolean containsValue(
             String values,
             String employeeValue
     ) {
-        if (!StringUtils.hasText(values)
-                || !StringUtils.hasText(
-                employeeValue
-        )) {
+
+        if (!StringUtils.hasText(
+                values
+        )
+                ||
+                !StringUtils.hasText(
+                        employeeValue
+                )) {
+
             return false;
         }
+
 
         return Arrays.stream(
                         values.split(",")
                 )
-                .map(String::trim)
-                .anyMatch(value ->
-                        value.equalsIgnoreCase(
-                                employeeValue.trim()
-                        )
+                .map(
+                        String::trim
+                )
+                .anyMatch(
+                        value ->
+                                value.equalsIgnoreCase(
+                                        employeeValue.trim()
+                                )
                 );
     }
+
+
+    // =========================================================
+    // COMPLIANCE SORTING
+    // =========================================================
 
     private Comparator<PolicyComplianceResponse>
     complianceComparator(
             String sortBy,
             String direction
     ) {
-        Function<PolicyComplianceResponse, Comparable<?>>
+
+        Function<
+                PolicyComplianceResponse,
+                Comparable<?>
+                >
                 extractor =
                 switch (sortBy) {
+
                     case "policyCode" ->
                             PolicyComplianceResponse
                                     ::getPolicyCode;
@@ -709,23 +1046,36 @@ public class ComplianceService {
                                     ::getPolicyName;
                 };
 
+
         Comparator<PolicyComplianceResponse>
                 comparator =
                 (first, second) ->
                         compareComparable(
-                                extractor.apply(first),
-                                extractor.apply(second)
+                                extractor.apply(
+                                        first
+                                ),
+                                extractor.apply(
+                                        second
+                                )
                         );
+
 
         if ("desc".equalsIgnoreCase(
                 direction
         )) {
+
             comparator =
                     comparator.reversed();
         }
 
+
         return comparator;
     }
+
+
+    // =========================================================
+    // COMPARABLE HELPER
+    // =========================================================
 
     @SuppressWarnings({
             "rawtypes",
@@ -735,52 +1085,97 @@ public class ComplianceService {
             Comparable first,
             Comparable second
     ) {
+
         if (first == null
-                && second == null) {
+                &&
+                second == null) {
+
             return 0;
         }
 
+
         if (first == null) {
+
             return -1;
         }
 
+
         if (second == null) {
+
             return 1;
         }
 
-        return first.compareTo(second);
+
+        return first.compareTo(
+                second
+        );
     }
+
+
+    // =========================================================
+    // ROUND PERCENTAGE
+    // =========================================================
 
     private double roundPercentage(
             double percentage
     ) {
+
         return Math.round(
-                percentage * 100.0
+                percentage
+                        * 100.0
         ) / 100.0;
     }
+
+
+    // =========================================================
+    // VALIDATE DATE RANGE
+    // =========================================================
 
     private void validateDates(
             LocalDate fromDate,
             LocalDate toDate
     ) {
+
         if (fromDate != null
-                && toDate != null
-                && fromDate.isAfter(toDate)) {
+                &&
+                toDate != null
+                &&
+                fromDate.isAfter(
+                        toDate
+                )) {
+
+            log.warn(
+                    "event=COMPLIANCE_REQUEST_REJECTED reason=INVALID_DATE_RANGE fromDate={} toDate={}",
+                    fromDate,
+                    toDate
+            );
+
             throw new BadRequestException(
                     "fromDate cannot be after toDate"
             );
         }
     }
 
+
+    // =========================================================
+    // ESCAPE CSV VALUE
+    // =========================================================
+
     private String escapeCsv(
             Object value
     ) {
+
         if (value == null) {
+
             return "";
         }
 
+
         String text =
-                String.valueOf(value);
+                String.valueOf(
+                        value
+                );
+
 
         return "\""
                 + text.replace(

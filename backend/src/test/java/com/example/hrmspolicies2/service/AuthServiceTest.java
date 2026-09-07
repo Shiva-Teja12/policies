@@ -5,11 +5,15 @@ import com.example.hrmspolicies2.dto.ForgotPasswordRequest;
 import com.example.hrmspolicies2.dto.LoginRequest;
 import com.example.hrmspolicies2.dto.ResetPasswordRequest;
 import com.example.hrmspolicies2.dto.SignupRequest;
+import com.example.hrmspolicies2.entity.PasswordResetToken;
 import com.example.hrmspolicies2.entity.User;
+import com.example.hrmspolicies2.enums.AccountStatus;
+import com.example.hrmspolicies2.enums.Role;
 import com.example.hrmspolicies2.exception.BadRequestException;
 import com.example.hrmspolicies2.exception.DuplicateResourceException;
-import com.example.hrmspolicies2.exception.ResourceNotFoundException;
+import com.example.hrmspolicies2.exception.ForbiddenException;
 import com.example.hrmspolicies2.exception.UnauthorizedException;
+import com.example.hrmspolicies2.repository.PasswordResetTokenRepository;
 import com.example.hrmspolicies2.repository.UserRepository;
 import com.example.hrmspolicies2.security.JwtService;
 
@@ -26,27 +30,18 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+import java.time.LocalDateTime;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-/**
- * Unit tests for {@link AuthService}.
- *
- * The repository, password encoder and JWT service are mocked with
- * Mockito so these tests exercise ONLY the service-layer logic
- * (validation, orchestration, exception mapping) — no Spring context,
- * no database, no HTTP layer. Each public method has both a "happy
- * path" test and one test per negative/edge-case branch.
- */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("AuthService")
 class AuthServiceTest {
@@ -60,342 +55,1355 @@ class AuthServiceTest {
     @Mock
     private JwtService jwtService;
 
+    @Mock
+    private NewJoinerPolicyAssignmentService
+            newJoinerPolicyAssignmentService;
+
+    @Mock
+    private PasswordResetTokenRepository
+            passwordResetTokenRepository;
+
+    @Mock
+    private PasswordResetEmailService
+            passwordResetEmailService;
+
     @InjectMocks
     private AuthService authService;
 
     private SignupRequest signupRequest;
     private LoginRequest loginRequest;
 
+
+    // =========================================================
+    // COMMON TEST DATA
+    // =========================================================
+
     @BeforeEach
     void setUp() {
-        signupRequest = new SignupRequest();
-        signupRequest.setName("Jane Doe");
-        signupRequest.setEmail("Jane.Doe@Example.com"); // mixed case on purpose
-        signupRequest.setPassword("SecurePass123");
 
-        loginRequest = new LoginRequest();
-        loginRequest.setEmail("jane.doe@example.com");
-        loginRequest.setPassword("SecurePass123");
+        signupRequest =
+                new SignupRequest();
+
+        signupRequest.setName(
+                "Jane Doe"
+        );
+
+        signupRequest.setEmail(
+                "Jane.Doe@Example.com"
+        );
+
+        signupRequest.setPassword(
+                "Secure@12"
+        );
+
+        signupRequest.setConfirmPassword(
+                "Secure@12"
+        );
+
+
+        loginRequest =
+                new LoginRequest();
+
+        loginRequest.setEmail(
+                "jane.doe@example.com"
+        );
+
+        loginRequest.setPassword(
+                "Secure@12"
+        );
+
+        loginRequest.setSelectedRole(
+                Role.EMPLOYEE
+        );
     }
 
-    // ======================================================
-    // SIGNUP
-    // ======================================================
+
+    // =========================================================
+    // SIGNUP TESTS
+    // =========================================================
 
     @Nested
     @DisplayName("signup()")
     class Signup {
 
+
         @Test
-        @DisplayName("creates and returns a new user when input is valid and email is unique")
+        @DisplayName(
+                "creates employee account when request is valid"
+        )
         void signup_success() {
-            when(userRepository.existsByEmail("jane.doe@example.com")).thenReturn(false);
-            when(passwordEncoder.encode("SecurePass123")).thenReturn("encoded-pw");
 
-            User savedUser = User.builder()
-                    .id(1L)
-                    .name("Jane Doe")
-                    .email("jane.doe@example.com")
-                    .password("encoded-pw")
-                    .role("USER")
-                    .build();
-            when(userRepository.save(any(User.class))).thenReturn(savedUser);
+            when(
+                    userRepository
+                            .existsByEmailIgnoreCase(
+                                    "jane.doe@example.com"
+                            )
+            ).thenReturn(
+                    false
+            );
 
-            AuthResponse response = authService.signup(signupRequest);
 
-            assertThat(response.getToken()).isNull();
-            assertThat(response.getMessage()).isEqualTo("Account created successfully");
-            assertThat(response.getRole()).isEqualTo("USER");
-            assertThat(response.getEmail()).isEqualTo("jane.doe@example.com");
+            when(
+                    passwordEncoder.encode(
+                            "Secure@12"
+                    )
+            ).thenReturn(
+                    "encoded-password"
+            );
 
-            // verify the email was normalized (trimmed + lower-cased) before being saved
-            ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
-            verify(userRepository).save(userCaptor.capture());
-            assertThat(userCaptor.getValue().getEmail()).isEqualTo("jane.doe@example.com");
-            assertThat(userCaptor.getValue().getPassword()).isEqualTo("encoded-pw");
+
+            User savedUser =
+                    User.builder()
+                            .id(
+                                    1L
+                            )
+                            .name(
+                                    "Jane Doe"
+                            )
+                            .email(
+                                    "jane.doe@example.com"
+                            )
+                            .password(
+                                    "encoded-password"
+                            )
+                            .role(
+                                    Role.EMPLOYEE
+                            )
+                            .accountStatus(
+                                    AccountStatus.ACTIVE
+                            )
+                            .build();
+
+
+            when(
+                    userRepository.save(
+                            any(User.class)
+                    )
+            ).thenReturn(
+                    savedUser
+            );
+
+
+            when(
+                    newJoinerPolicyAssignmentService
+                            .assignMandatoryPolicies(
+                                    savedUser
+                            )
+            ).thenReturn(
+                    2
+            );
+
+
+            AuthResponse response =
+                    authService.signup(
+                            signupRequest
+                    );
+
+
+            assertThat(
+                    response.getMessage()
+            ).isEqualTo(
+                    "Employee account created successfully"
+            );
+
+
+            assertThat(
+                    response.getUserId()
+            ).isEqualTo(
+                    1L
+            );
+
+
+            assertThat(
+                    response.getEmail()
+            ).isEqualTo(
+                    "jane.doe@example.com"
+            );
+
+
+            assertThat(
+                    response.getRole()
+            ).isEqualTo(
+                    Role.EMPLOYEE
+            );
+
+
+            assertThat(
+                    response.getToken()
+            ).isNull();
+
+
+            ArgumentCaptor<User> userCaptor =
+                    ArgumentCaptor.forClass(
+                            User.class
+                    );
+
+
+            verify(
+                    userRepository
+            ).save(
+                    userCaptor.capture()
+            );
+
+
+            User capturedUser =
+                    userCaptor.getValue();
+
+
+            assertThat(
+                    capturedUser.getEmail()
+            ).isEqualTo(
+                    "jane.doe@example.com"
+            );
+
+
+            assertThat(
+                    capturedUser.getPassword()
+            ).isEqualTo(
+                    "encoded-password"
+            );
+
+
+            assertThat(
+                    capturedUser.getRole()
+            ).isEqualTo(
+                    Role.EMPLOYEE
+            );
         }
 
+
         @Test
-        @DisplayName("throws BadRequestException when name is blank")
-        void signup_blankName_throwsBadRequest() {
-            signupRequest.setName("   ");
+        @DisplayName(
+                "throws exception when passwords do not match"
+        )
+        void signup_passwordMismatch() {
 
-            assertThatThrownBy(() -> authService.signup(signupRequest))
-                    .isInstanceOf(BadRequestException.class)
-                    .hasMessage("Name is required");
+            signupRequest.setConfirmPassword(
+                    "Different@1"
+            );
 
-            verify(userRepository, never()).save(any());
+
+            assertThatThrownBy(
+                    () ->
+                            authService.signup(
+                                    signupRequest
+                            )
+            )
+                    .isInstanceOf(
+                            BadRequestException.class
+                    )
+                    .hasMessage(
+                            "Password and confirm password do not match"
+                    );
+
+
+            verify(
+                    userRepository,
+                    never()
+            ).save(
+                    any(User.class)
+            );
         }
 
-        @Test
-        @DisplayName("throws BadRequestException when name is null")
-        void signup_nullName_throwsBadRequest() {
-            signupRequest.setName(null);
 
-            assertThatThrownBy(() -> authService.signup(signupRequest))
-                    .isInstanceOf(BadRequestException.class)
-                    .hasMessage("Name is required");
+        @Test
+        @DisplayName(
+                "throws exception when password is weak"
+        )
+        void signup_weakPassword() {
+
+            signupRequest.setPassword(
+                    "weak"
+            );
+
+            signupRequest.setConfirmPassword(
+                    "weak"
+            );
+
+
+            assertThatThrownBy(
+                    () ->
+                            authService.signup(
+                                    signupRequest
+                            )
+            )
+                    .isInstanceOf(
+                            BadRequestException.class
+                    );
+
+
+            verify(
+                    userRepository,
+                    never()
+            ).save(
+                    any(User.class)
+            );
         }
 
-        @Test
-        @DisplayName("throws BadRequestException when email is blank")
-        void signup_blankEmail_throwsBadRequest() {
-            signupRequest.setEmail("  ");
-
-            assertThatThrownBy(() -> authService.signup(signupRequest))
-                    .isInstanceOf(BadRequestException.class)
-                    .hasMessage("Email is required");
-        }
 
         @Test
-        @DisplayName("throws BadRequestException when password is shorter than 6 characters")
-        void signup_shortPassword_throwsBadRequest() {
-            signupRequest.setPassword("123");
+        @DisplayName(
+                "throws exception when email already exists"
+        )
+        void signup_duplicateEmail() {
 
-            assertThatThrownBy(() -> authService.signup(signupRequest))
-                    .isInstanceOf(BadRequestException.class)
-                    .hasMessage("Password must be at least 6 characters");
-        }
+            when(
+                    userRepository
+                            .existsByEmailIgnoreCase(
+                                    "jane.doe@example.com"
+                            )
+            ).thenReturn(
+                    true
+            );
 
-        @Test
-        @DisplayName("throws BadRequestException when password is null")
-        void signup_nullPassword_throwsBadRequest() {
-            signupRequest.setPassword(null);
 
-            assertThatThrownBy(() -> authService.signup(signupRequest))
-                    .isInstanceOf(BadRequestException.class)
-                    .hasMessage("Password must be at least 6 characters");
-        }
+            assertThatThrownBy(
+                    () ->
+                            authService.signup(
+                                    signupRequest
+                            )
+            )
+                    .isInstanceOf(
+                            DuplicateResourceException.class
+                    )
+                    .hasMessage(
+                            "An account already exists with this email"
+                    );
 
-        @Test
-        @DisplayName("throws DuplicateResourceException when the email is already registered")
-        void signup_duplicateEmail_throwsDuplicateResource() {
-            when(userRepository.existsByEmail("jane.doe@example.com")).thenReturn(true);
 
-            assertThatThrownBy(() -> authService.signup(signupRequest))
-                    .isInstanceOf(DuplicateResourceException.class)
-                    .hasMessage("Email already registered");
-
-            verify(userRepository, never()).save(any());
-            verify(passwordEncoder, never()).encode(anyString());
+            verify(
+                    userRepository,
+                    never()
+            ).save(
+                    any(User.class)
+            );
         }
     }
 
-    // ======================================================
-    // LOGIN
-    // ======================================================
+
+    // =========================================================
+    // LOGIN TESTS
+    // =========================================================
 
     @Nested
     @DisplayName("login()")
     class Login {
 
+
         @Test
-        @DisplayName("returns a token and user details on valid credentials")
+        @DisplayName(
+                "returns JWT when credentials and role are valid"
+        )
         void login_success() {
-            User user = User.builder()
-                    .id(1L)
-                    .name("Jane Doe")
-                    .email("jane.doe@example.com")
-                    .password("encoded-pw")
-                    .role("USER")
-                    .build();
 
-            when(userRepository.findByEmail("jane.doe@example.com")).thenReturn(Optional.of(user));
-            when(passwordEncoder.matches("SecurePass123", "encoded-pw")).thenReturn(true);
-            when(jwtService.generateToken("jane.doe@example.com", "USER")).thenReturn("jwt-token-value");
+            User user =
+                    User.builder()
+                            .id(
+                                    1L
+                            )
+                            .name(
+                                    "Jane Doe"
+                            )
+                            .email(
+                                    "jane.doe@example.com"
+                            )
+                            .password(
+                                    "encoded-password"
+                            )
+                            .role(
+                                    Role.EMPLOYEE
+                            )
+                            .accountStatus(
+                                    AccountStatus.ACTIVE
+                            )
+                            .build();
 
-            AuthResponse response = authService.login(loginRequest);
 
-            assertThat(response.getToken()).isEqualTo("jwt-token-value");
-            assertThat(response.getMessage()).isEqualTo("Login successful");
-            assertThat(response.getRole()).isEqualTo("USER");
-            assertThat(response.getEmail()).isEqualTo("jane.doe@example.com");
+            when(
+                    userRepository
+                            .findByEmailIgnoreCase(
+                                    "jane.doe@example.com"
+                            )
+            ).thenReturn(
+                    Optional.of(
+                            user
+                    )
+            );
+
+
+            when(
+                    passwordEncoder.matches(
+                            "Secure@12",
+                            "encoded-password"
+                    )
+            ).thenReturn(
+                    true
+            );
+
+
+            when(
+                    jwtService.generateToken(
+                            1L,
+                            "jane.doe@example.com",
+                            Role.EMPLOYEE
+                    )
+            ).thenReturn(
+                    "jwt-token-value"
+            );
+
+
+            AuthResponse response =
+                    authService.login(
+                            loginRequest
+                    );
+
+
+            assertThat(
+                    response.getToken()
+            ).isEqualTo(
+                    "jwt-token-value"
+            );
+
+
+            assertThat(
+                    response.getMessage()
+            ).isEqualTo(
+                    "Login successful"
+            );
+
+
+            assertThat(
+                    response.getRole()
+            ).isEqualTo(
+                    Role.EMPLOYEE
+            );
+
+
+            assertThat(
+                    response.getEmail()
+            ).isEqualTo(
+                    "jane.doe@example.com"
+            );
         }
 
+
         @Test
-        @DisplayName("throws BadRequestException when email is null")
-        void login_nullEmail_throwsBadRequest() {
-            loginRequest.setEmail(null);
+        @DisplayName(
+                "throws UnauthorizedException when user does not exist"
+        )
+        void login_unknownEmail() {
 
-            assertThatThrownBy(() -> authService.login(loginRequest))
-                    .isInstanceOf(BadRequestException.class)
-                    .hasMessage("Email and password are required");
+            when(
+                    userRepository
+                            .findByEmailIgnoreCase(
+                                    "jane.doe@example.com"
+                            )
+            ).thenReturn(
+                    Optional.empty()
+            );
 
-            verify(userRepository, never()).findByEmail(any());
+
+            assertThatThrownBy(
+                    () ->
+                            authService.login(
+                                    loginRequest
+                            )
+            )
+                    .isInstanceOf(
+                            UnauthorizedException.class
+                    )
+                    .hasMessage(
+                            "Invalid email or password"
+                    );
+
+
+            verify(
+                    jwtService,
+                    never()
+            ).generateToken(
+                    any(),
+                    anyString(),
+                    any()
+            );
         }
 
-        @Test
-        @DisplayName("throws BadRequestException when password is null")
-        void login_nullPassword_throwsBadRequest() {
-            loginRequest.setPassword(null);
 
-            assertThatThrownBy(() -> authService.login(loginRequest))
-                    .isInstanceOf(BadRequestException.class)
-                    .hasMessage("Email and password are required");
+        @Test
+        @DisplayName(
+                "throws UnauthorizedException when password is incorrect"
+        )
+        void login_wrongPassword() {
+
+            User user =
+                    User.builder()
+                            .id(
+                                    1L
+                            )
+                            .email(
+                                    "jane.doe@example.com"
+                            )
+                            .password(
+                                    "encoded-password"
+                            )
+                            .role(
+                                    Role.EMPLOYEE
+                            )
+                            .accountStatus(
+                                    AccountStatus.ACTIVE
+                            )
+                            .build();
+
+
+            when(
+                    userRepository
+                            .findByEmailIgnoreCase(
+                                    "jane.doe@example.com"
+                            )
+            ).thenReturn(
+                    Optional.of(
+                            user
+                    )
+            );
+
+
+            when(
+                    passwordEncoder.matches(
+                            "Secure@12",
+                            "encoded-password"
+                    )
+            ).thenReturn(
+                    false
+            );
+
+
+            assertThatThrownBy(
+                    () ->
+                            authService.login(
+                                    loginRequest
+                            )
+            )
+                    .isInstanceOf(
+                            UnauthorizedException.class
+                    )
+                    .hasMessage(
+                            "Invalid email or password"
+                    );
+
+
+            verify(
+                    jwtService,
+                    never()
+            ).generateToken(
+                    any(),
+                    anyString(),
+                    any()
+            );
         }
 
+
         @Test
-        @DisplayName("throws UnauthorizedException when no account exists for the email")
-        void login_unknownEmail_throwsUnauthorized() {
-            when(userRepository.findByEmail("jane.doe@example.com")).thenReturn(Optional.empty());
+        @DisplayName(
+                "throws ForbiddenException when account is locked"
+        )
+        void login_lockedAccount() {
 
-            assertThatThrownBy(() -> authService.login(loginRequest))
-                    .isInstanceOf(UnauthorizedException.class)
-                    .hasMessage("Invalid email or password");
+            User user =
+                    User.builder()
+                            .id(
+                                    1L
+                            )
+                            .email(
+                                    "jane.doe@example.com"
+                            )
+                            .password(
+                                    "encoded-password"
+                            )
+                            .role(
+                                    Role.EMPLOYEE
+                            )
+                            .accountStatus(
+                                    AccountStatus.LOCKED
+                            )
+                            .build();
 
-            verify(jwtService, never()).generateToken(any(), any());
+
+            when(
+                    userRepository
+                            .findByEmailIgnoreCase(
+                                    "jane.doe@example.com"
+                            )
+            ).thenReturn(
+                    Optional.of(
+                            user
+                    )
+            );
+
+
+            when(
+                    passwordEncoder.matches(
+                            "Secure@12",
+                            "encoded-password"
+                    )
+            ).thenReturn(
+                    true
+            );
+
+
+            assertThatThrownBy(
+                    () ->
+                            authService.login(
+                                    loginRequest
+                            )
+            )
+                    .isInstanceOf(
+                            ForbiddenException.class
+                    );
         }
 
+
         @Test
-        @DisplayName("throws UnauthorizedException when the password does not match")
-        void login_wrongPassword_throwsUnauthorized() {
-            User user = User.builder()
-                    .email("jane.doe@example.com")
-                    .password("encoded-pw")
-                    .role("USER")
-                    .build();
+        @DisplayName(
+                "throws ForbiddenException when account is disabled"
+        )
+        void login_disabledAccount() {
 
-            when(userRepository.findByEmail("jane.doe@example.com")).thenReturn(Optional.of(user));
-            when(passwordEncoder.matches("SecurePass123", "encoded-pw")).thenReturn(false);
+            User user =
+                    User.builder()
+                            .id(
+                                    1L
+                            )
+                            .email(
+                                    "jane.doe@example.com"
+                            )
+                            .password(
+                                    "encoded-password"
+                            )
+                            .role(
+                                    Role.EMPLOYEE
+                            )
+                            .accountStatus(
+                                    AccountStatus.DISABLED
+                            )
+                            .build();
 
-            assertThatThrownBy(() -> authService.login(loginRequest))
-                    .isInstanceOf(UnauthorizedException.class)
-                    .hasMessage("Invalid email or password");
 
-            verify(jwtService, never()).generateToken(any(), any());
+            when(
+                    userRepository
+                            .findByEmailIgnoreCase(
+                                    "jane.doe@example.com"
+                            )
+            ).thenReturn(
+                    Optional.of(
+                            user
+                    )
+            );
+
+
+            when(
+                    passwordEncoder.matches(
+                            "Secure@12",
+                            "encoded-password"
+                    )
+            ).thenReturn(
+                    true
+            );
+
+
+            assertThatThrownBy(
+                    () ->
+                            authService.login(
+                                    loginRequest
+                            )
+            )
+                    .isInstanceOf(
+                            ForbiddenException.class
+                    );
+        }
+
+
+        @Test
+        @DisplayName(
+                "throws ForbiddenException when selected role does not match"
+        )
+        void login_roleMismatch() {
+
+            User user =
+                    User.builder()
+                            .id(
+                                    1L
+                            )
+                            .email(
+                                    "jane.doe@example.com"
+                            )
+                            .password(
+                                    "encoded-password"
+                            )
+                            .role(
+                                    Role.EMPLOYEE
+                            )
+                            .accountStatus(
+                                    AccountStatus.ACTIVE
+                            )
+                            .build();
+
+
+            loginRequest.setSelectedRole(
+                    Role.HR_ADMIN
+            );
+
+
+            when(
+                    userRepository
+                            .findByEmailIgnoreCase(
+                                    "jane.doe@example.com"
+                            )
+            ).thenReturn(
+                    Optional.of(
+                            user
+                    )
+            );
+
+
+            when(
+                    passwordEncoder.matches(
+                            "Secure@12",
+                            "encoded-password"
+                    )
+            ).thenReturn(
+                    true
+            );
+
+
+            assertThatThrownBy(
+                    () ->
+                            authService.login(
+                                    loginRequest
+                            )
+            )
+                    .isInstanceOf(
+                            ForbiddenException.class
+                    );
         }
     }
 
-    // ======================================================
-    // FORGOT PASSWORD
-    // ======================================================
+
+    // =========================================================
+    // FORGOT PASSWORD TESTS
+    // =========================================================
 
     @Nested
     @DisplayName("forgotPassword()")
-    class Forgot {
+    class ForgotPassword {
+
 
         @Test
-        @DisplayName("returns a confirmation message when the email is registered")
+        @DisplayName(
+                "creates reset token and sends email"
+        )
         void forgotPassword_success() {
-            ForgotPasswordRequest request = new ForgotPasswordRequest();
-            request.setEmail("jane.doe@example.com");
 
-            when(userRepository.findByEmail("jane.doe@example.com"))
-                    .thenReturn(Optional.of(User.builder().email("jane.doe@example.com").build()));
+            ForgotPasswordRequest request =
+                    new ForgotPasswordRequest();
 
-            String result = authService.forgotPassword(request);
+            request.setEmail(
+                    "jane.doe@example.com"
+            );
 
-            assertThat(result).isEqualTo("Email verified. You can now reset your password.");
+
+            User user =
+                    User.builder()
+                            .id(
+                                    1L
+                            )
+                            .name(
+                                    "Jane Doe"
+                            )
+                            .email(
+                                    "jane.doe@example.com"
+                            )
+                            .build();
+
+
+            when(
+                    userRepository
+                            .findByEmailIgnoreCase(
+                                    "jane.doe@example.com"
+                            )
+            ).thenReturn(
+                    Optional.of(
+                            user
+                    )
+            );
+
+
+            String result =
+                    authService.forgotPassword(
+                            request
+                    );
+
+
+            assertThat(
+                    result
+            ).isEqualTo(
+                    "Reset link has been sent to jane.doe@example.com"
+            );
+
+
+            verify(
+                    passwordResetTokenRepository
+            ).deleteByUser(
+                    user
+            );
+
+
+            verify(
+                    passwordResetTokenRepository
+            ).save(
+                    any(PasswordResetToken.class)
+            );
+
+
+            verify(
+                    passwordResetEmailService
+            ).sendResetEmail(
+                    anyString(),
+                    anyString(),
+                    anyString()
+            );
         }
 
-        @Test
-        @DisplayName("throws BadRequestException when email is blank")
-        void forgotPassword_blankEmail_throwsBadRequest() {
-            ForgotPasswordRequest request = new ForgotPasswordRequest();
-            request.setEmail(" ");
-
-            assertThatThrownBy(() -> authService.forgotPassword(request))
-                    .isInstanceOf(BadRequestException.class)
-                    .hasMessage("Email is required");
-        }
 
         @Test
-        @DisplayName("throws ResourceNotFoundException when no account exists for the email")
-        void forgotPassword_unknownEmail_throwsResourceNotFound() {
-            ForgotPasswordRequest request = new ForgotPasswordRequest();
-            request.setEmail("missing@example.com");
+        @DisplayName(
+                "throws BadRequestException when email does not exist"
+        )
+        void forgotPassword_unknownEmail() {
 
-            when(userRepository.findByEmail("missing@example.com")).thenReturn(Optional.empty());
+            ForgotPasswordRequest request =
+                    new ForgotPasswordRequest();
 
-            assertThatThrownBy(() -> authService.forgotPassword(request))
-                    .isInstanceOf(ResourceNotFoundException.class)
-                    .hasMessage("No account found with this email");
+            request.setEmail(
+                    "missing@example.com"
+            );
+
+
+            when(
+                    userRepository
+                            .findByEmailIgnoreCase(
+                                    "missing@example.com"
+                            )
+            ).thenReturn(
+                    Optional.empty()
+            );
+
+
+            assertThatThrownBy(
+                    () ->
+                            authService.forgotPassword(
+                                    request
+                            )
+            )
+                    .isInstanceOf(
+                            BadRequestException.class
+                    )
+                    .hasMessage(
+                            "The email is not registered: missing@example.com"
+                    );
+
+
+            verify(
+                    passwordResetTokenRepository,
+                    never()
+            ).save(
+                    any(PasswordResetToken.class)
+            );
         }
     }
 
-    // ======================================================
-    // RESET PASSWORD
-    // ======================================================
+
+    // =========================================================
+    // VALIDATE RESET TOKEN TESTS
+    // =========================================================
+
+    @Nested
+    @DisplayName("validateResetToken()")
+    class ValidateResetToken {
+
+
+        @Test
+        @DisplayName(
+                "returns valid message for valid reset token"
+        )
+        void validateResetToken_success() {
+
+            User user =
+                    User.builder()
+                            .id(
+                                    1L
+                            )
+                            .email(
+                                    "jane.doe@example.com"
+                            )
+                            .build();
+
+
+            PasswordResetToken token =
+                    new PasswordResetToken();
+
+            token.setToken(
+                    "valid-reset-token"
+            );
+
+            token.setUser(
+                    user
+            );
+
+            token.setUsed(
+                    false
+            );
+
+            token.setExpiresAt(
+                    LocalDateTime.now()
+                            .plusMinutes(
+                                    10
+                            )
+            );
+
+
+            when(
+                    passwordResetTokenRepository
+                            .findByToken(
+                                    "valid-reset-token"
+                            )
+            ).thenReturn(
+                    Optional.of(
+                            token
+                    )
+            );
+
+
+            String result =
+                    authService.validateResetToken(
+                            "valid-reset-token"
+                    );
+
+
+            assertThat(
+                    result
+            ).isEqualTo(
+                    "Password reset link is valid"
+            );
+        }
+
+
+        @Test
+        @DisplayName(
+                "throws BadRequestException when token is blank"
+        )
+        void validateResetToken_blankToken() {
+
+            assertThatThrownBy(
+                    () ->
+                            authService.validateResetToken(
+                                    " "
+                            )
+            )
+                    .isInstanceOf(
+                            BadRequestException.class
+                    )
+                    .hasMessage(
+                            "Invalid password reset link"
+                    );
+        }
+
+
+        @Test
+        @DisplayName(
+                "throws BadRequestException when token does not exist"
+        )
+        void validateResetToken_invalidToken() {
+
+            when(
+                    passwordResetTokenRepository
+                            .findByToken(
+                                    "invalid-token"
+                            )
+            ).thenReturn(
+                    Optional.empty()
+            );
+
+
+            assertThatThrownBy(
+                    () ->
+                            authService.validateResetToken(
+                                    "invalid-token"
+                            )
+            )
+                    .isInstanceOf(
+                            BadRequestException.class
+                    )
+                    .hasMessage(
+                            "Invalid password reset link"
+                    );
+        }
+
+
+        @Test
+        @DisplayName(
+                "throws BadRequestException when token was already used"
+        )
+        void validateResetToken_usedToken() {
+
+            User user =
+                    User.builder()
+                            .id(
+                                    1L
+                            )
+                            .build();
+
+
+            PasswordResetToken token =
+                    new PasswordResetToken();
+
+            token.setUser(
+                    user
+            );
+
+            token.setUsed(
+                    true
+            );
+
+            token.setExpiresAt(
+                    LocalDateTime.now()
+                            .plusMinutes(
+                                    10
+                            )
+            );
+
+
+            when(
+                    passwordResetTokenRepository
+                            .findByToken(
+                                    "used-token"
+                            )
+            ).thenReturn(
+                    Optional.of(
+                            token
+                    )
+            );
+
+
+            assertThatThrownBy(
+                    () ->
+                            authService.validateResetToken(
+                                    "used-token"
+                            )
+            )
+                    .isInstanceOf(
+                            BadRequestException.class
+                    )
+                    .hasMessage(
+                            "This password reset link has already been used"
+                    );
+        }
+    }
+
+
+    // =========================================================
+    // RESET PASSWORD TESTS
+    // =========================================================
 
     @Nested
     @DisplayName("resetPassword()")
-    class Reset {
+    class ResetPassword {
 
         private ResetPasswordRequest request;
 
+
         @BeforeEach
         void init() {
-            request = new ResetPasswordRequest();
-            request.setEmail("jane.doe@example.com");
-            request.setNewPassword("NewSecurePass456");
-            request.setConfirmPassword("NewSecurePass456");
+
+            request =
+                    new ResetPasswordRequest();
+
+            request.setToken(
+                    "valid-reset-token"
+            );
+
+            request.setNewPassword(
+                    "New@Pass1"
+            );
+
+            request.setConfirmPassword(
+                    "New@Pass1"
+            );
         }
 
+
         @Test
-        @DisplayName("encodes and saves the new password when everything is valid")
+        @DisplayName(
+                "updates password when reset token is valid"
+        )
         void resetPassword_success() {
-            User user = User.builder().email("jane.doe@example.com").password("old-encoded").build();
 
-            when(userRepository.findByEmail("jane.doe@example.com")).thenReturn(Optional.of(user));
-            when(passwordEncoder.encode("NewSecurePass456")).thenReturn("new-encoded");
+            User user =
+                    User.builder()
+                            .id(
+                                    1L
+                            )
+                            .name(
+                                    "Jane Doe"
+                            )
+                            .email(
+                                    "jane.doe@example.com"
+                            )
+                            .password(
+                                    "old-password"
+                            )
+                            .build();
 
-            String result = authService.resetPassword(request);
 
-            assertThat(result).isEqualTo("Password updated successfully");
-            assertThat(user.getPassword()).isEqualTo("new-encoded");
-            verify(userRepository, times(1)).save(user);
+            PasswordResetToken resetToken =
+                    new PasswordResetToken();
+
+            resetToken.setToken(
+                    "valid-reset-token"
+            );
+
+            resetToken.setUser(
+                    user
+            );
+
+            resetToken.setUsed(
+                    false
+            );
+
+            resetToken.setExpiresAt(
+                    LocalDateTime.now()
+                            .plusMinutes(
+                                    10
+                            )
+            );
+
+
+            when(
+                    passwordResetTokenRepository
+                            .findByToken(
+                                    "valid-reset-token"
+                            )
+            ).thenReturn(
+                    Optional.of(
+                            resetToken
+                    )
+            );
+
+
+            when(
+                    passwordEncoder.encode(
+                            "New@Pass1"
+                    )
+            ).thenReturn(
+                    "new-encoded-password"
+            );
+
+
+            String result =
+                    authService.resetPassword(
+                            request
+                    );
+
+
+            assertThat(
+                    result
+            ).isEqualTo(
+                    "Password reset successfully"
+            );
+
+
+            assertThat(
+                    user.getPassword()
+            ).isEqualTo(
+                    "new-encoded-password"
+            );
+
+
+            assertThat(
+                    resetToken.isUsed()
+            ).isTrue();
+
+
+            verify(
+                    userRepository
+            ).save(
+                    user
+            );
+
+
+            verify(
+                    passwordResetTokenRepository
+            ).save(
+                    resetToken
+            );
+
+
+            verify(
+                    passwordResetEmailService
+            ).sendPasswordChangedEmail(
+                    "jane.doe@example.com",
+                    "Jane Doe"
+            );
         }
 
-        @Test
-        @DisplayName("throws BadRequestException when email is blank")
-        void resetPassword_blankEmail_throwsBadRequest() {
-            request.setEmail("");
 
-            assertThatThrownBy(() -> authService.resetPassword(request))
-                    .isInstanceOf(BadRequestException.class)
-                    .hasMessage("Email is required");
+        @Test
+        @DisplayName(
+                "throws BadRequestException when passwords do not match"
+        )
+        void resetPassword_passwordMismatch() {
+
+            request.setConfirmPassword(
+                    "Different@1"
+            );
+
+
+            assertThatThrownBy(
+                    () ->
+                            authService.resetPassword(
+                                    request
+                            )
+            )
+                    .isInstanceOf(
+                            BadRequestException.class
+                    )
+                    .hasMessage(
+                            "New password and confirm password do not match"
+                    );
         }
 
-        @Test
-        @DisplayName("throws BadRequestException when new password is too short")
-        void resetPassword_shortPassword_throwsBadRequest() {
-            request.setNewPassword("123");
 
-            assertThatThrownBy(() -> authService.resetPassword(request))
-                    .isInstanceOf(BadRequestException.class)
-                    .hasMessage("Password must be at least 6 characters");
+        @Test
+        @DisplayName(
+                "throws BadRequestException when new password is weak"
+        )
+        void resetPassword_weakPassword() {
+
+            request.setNewPassword(
+                    "weak"
+            );
+
+            request.setConfirmPassword(
+                    "weak"
+            );
+
+
+            assertThatThrownBy(
+                    () ->
+                            authService.resetPassword(
+                                    request
+                            )
+            )
+                    .isInstanceOf(
+                            BadRequestException.class
+                    );
         }
 
-        @Test
-        @DisplayName("throws BadRequestException when confirmPassword is null")
-        void resetPassword_nullConfirmPassword_throwsBadRequest() {
-            request.setConfirmPassword(null);
 
-            assertThatThrownBy(() -> authService.resetPassword(request))
-                    .isInstanceOf(BadRequestException.class)
-                    .hasMessage("Confirm password is required");
+        @Test
+        @DisplayName(
+                "throws BadRequestException when token is invalid"
+        )
+        void resetPassword_invalidToken() {
+
+            when(
+                    passwordResetTokenRepository
+                            .findByToken(
+                                    "valid-reset-token"
+                            )
+            ).thenReturn(
+                    Optional.empty()
+            );
+
+
+            assertThatThrownBy(
+                    () ->
+                            authService.resetPassword(
+                                    request
+                            )
+            )
+                    .isInstanceOf(
+                            BadRequestException.class
+                    )
+                    .hasMessage(
+                            "Invalid password reset link"
+                    );
+
+
+            verify(
+                    userRepository,
+                    never()
+            ).save(
+                    any(User.class)
+            );
         }
 
-        @Test
-        @DisplayName("throws BadRequestException when passwords do not match")
-        void resetPassword_mismatchedPasswords_throwsBadRequest() {
-            request.setConfirmPassword("SomethingElse789");
-
-            assertThatThrownBy(() -> authService.resetPassword(request))
-                    .isInstanceOf(BadRequestException.class)
-                    .hasMessage("Passwords do not match");
-        }
 
         @Test
-        @DisplayName("throws ResourceNotFoundException when no account exists for the email")
-        void resetPassword_unknownEmail_throwsResourceNotFound() {
-            when(userRepository.findByEmail("jane.doe@example.com")).thenReturn(Optional.empty());
+        @DisplayName(
+                "throws BadRequestException when token is already used"
+        )
+        void resetPassword_usedToken() {
 
-            assertThatThrownBy(() -> authService.resetPassword(request))
-                    .isInstanceOf(ResourceNotFoundException.class)
-                    .hasMessage("No account found with this email");
+            User user =
+                    User.builder()
+                            .id(
+                                    1L
+                            )
+                            .build();
 
-            verify(passwordEncoder, never()).encode(anyString());
+
+            PasswordResetToken resetToken =
+                    new PasswordResetToken();
+
+            resetToken.setUser(
+                    user
+            );
+
+            resetToken.setUsed(
+                    true
+            );
+
+            resetToken.setExpiresAt(
+                    LocalDateTime.now()
+                            .plusMinutes(
+                                    10
+                            )
+            );
+
+
+            when(
+                    passwordResetTokenRepository
+                            .findByToken(
+                                    "valid-reset-token"
+                            )
+            ).thenReturn(
+                    Optional.of(
+                            resetToken
+                    )
+            );
+
+
+            assertThatThrownBy(
+                    () ->
+                            authService.resetPassword(
+                                    request
+                            )
+            )
+                    .isInstanceOf(
+                            BadRequestException.class
+                    )
+                    .hasMessage(
+                            "This password reset link has already been used"
+                    );
         }
     }
 }
