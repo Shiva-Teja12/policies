@@ -1506,3 +1506,1641 @@ Next.js Frontend
 ```
 
 The backend remains responsible for authentication validation and authorization enforcement, while the frontend provides role-specific user interfaces and securely handles the application session.
+
+---
+
+# Logging, Monitoring, Profiles and Environment Configuration
+
+This section documents the backend hardening work completed for the HRMS Policies application.
+
+The implementation includes:
+
+- Structured application logging
+- Business-operation logging
+- Authentication and security logging
+- Global exception logging
+- Spring Boot Actuator
+- Application health monitoring
+- Development, test, and production profiles
+- Externalized database configuration
+- Externalized JWT configuration
+- Externalized Google OAuth configuration
+- Externalized mail configuration
+- Environment-variable based secrets
+- Development environment verification
+
+
+---
+
+# Spring Boot Actuator
+
+The backend uses Spring Boot Actuator for health checks, monitoring, application information, and metrics.
+
+The following dependency is included in `backend/pom.xml`:
+
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-actuator</artifactId>
+</dependency>
+```
+
+
+---
+
+# Actuator Common Configuration
+
+Common Actuator configuration can be placed in:
+
+```text
+backend/src/main/resources/application.properties
+```
+
+Example:
+
+```properties
+management.endpoints.web.base-path=/actuator
+management.endpoint.health.show-details=when_authorized
+management.health.defaults.enabled=true
+management.info.env.enabled=true
+
+info.app.name=HRMS Policies
+info.app.description=HRMS Policies Management Service
+info.app.version=0.0.1-SNAPSHOT
+```
+
+Actuator endpoint exposure is controlled separately by the development, test, and production profiles.
+
+
+---
+
+# Actuator Health Endpoint
+
+Endpoint:
+
+```text
+GET /actuator/health
+```
+
+Development URL:
+
+```text
+http://localhost:8080/actuator/health
+```
+
+A healthy application returns:
+
+```json
+{
+  "status": "UP"
+}
+```
+
+During development, detailed health information may include:
+
+```text
+db
+diskSpace
+mail
+ping
+ssl
+```
+
+The components represent:
+
+```text
+db
+PostgreSQL database connectivity
+
+diskSpace
+Available disk space
+
+mail
+SMTP mail server connectivity
+
+ping
+Basic application health
+
+ssl
+SSL certificate health information
+```
+
+The development environment has successfully reported the application status as:
+
+```text
+UP
+```
+
+PostgreSQL database connectivity has also been successfully verified.
+
+
+---
+
+# Actuator Info Endpoint
+
+Endpoint:
+
+```text
+GET /actuator/info
+```
+
+URL:
+
+```text
+http://localhost:8080/actuator/info
+```
+
+Application information is configured using:
+
+```properties
+info.app.name=HRMS Policies
+info.app.description=HRMS Policies Management Service
+info.app.version=0.0.1-SNAPSHOT
+```
+
+
+---
+
+# Actuator Metrics Endpoint
+
+Endpoint:
+
+```text
+GET /actuator/metrics
+```
+
+URL:
+
+```text
+http://localhost:8080/actuator/metrics
+```
+
+The metrics endpoint exposes available JVM and application metrics.
+
+Examples may include:
+
+```text
+JVM memory
+JVM threads
+HTTP server requests
+Process CPU usage
+System CPU usage
+Database connection pool statistics
+Application startup information
+```
+
+
+---
+
+# Actuator Security
+
+Actuator exposure is configured differently for each environment.
+
+Development and testing may expose additional endpoints for troubleshooting.
+
+Production exposure must remain restricted.
+
+
+---
+
+# Development Actuator Configuration
+
+File:
+
+```text
+backend/src/main/resources/application-dev.properties
+```
+
+Configuration:
+
+```properties
+management.endpoints.web.exposure.include=*
+management.endpoint.env.show-values=never
+management.endpoint.health.show-details=always
+
+logging.level.root=INFO
+logging.level.com.example.hrmspolicies2=DEBUG
+```
+
+All Actuator endpoints can be exposed during local development for debugging and verification.
+
+Environment values are hidden using:
+
+```properties
+management.endpoint.env.show-values=never
+```
+
+
+---
+
+# Test Actuator Configuration
+
+File:
+
+```text
+backend/src/main/resources/application-test.properties
+```
+
+Configuration:
+
+```properties
+management.endpoints.web.exposure.include=*
+management.endpoint.env.show-values=never
+management.endpoint.health.show-details=always
+
+logging.level.root=INFO
+logging.level.com.example.hrmspolicies2=INFO
+```
+
+The test environment can expose additional Actuator endpoints to support automated and integration testing.
+
+
+---
+
+# Production Actuator Configuration
+
+File:
+
+```text
+backend/src/main/resources/application-prod.properties
+```
+
+Configuration:
+
+```properties
+management.endpoints.web.exposure.include=health,info,metrics
+management.endpoint.env.show-values=never
+management.endpoint.health.show-details=never
+
+logging.level.root=INFO
+logging.level.com.example.hrmspolicies2=INFO
+```
+
+Production must not expose every Actuator endpoint.
+
+Only the required monitoring endpoints should be available:
+
+```text
+health
+info
+metrics
+```
+
+Detailed health information is disabled in production to reduce information exposure.
+
+
+---
+
+# Spring Boot Profiles
+
+The backend supports three environment profiles:
+
+```text
+dev
+test
+prod
+```
+
+The profile files are located in:
+
+```text
+backend/src/main/resources/
+```
+
+Files:
+
+```text
+application.properties
+application-dev.properties
+application-test.properties
+application-prod.properties
+```
+
+
+---
+
+# Active Profile
+
+The active Spring profile can be selected using the environment variable:
+
+```text
+SPRING_PROFILES_ACTIVE
+```
+
+The common configuration can use:
+
+```properties
+spring.profiles.active=${SPRING_PROFILES_ACTIVE:dev}
+```
+
+If no value is supplied, the backend uses:
+
+```text
+dev
+```
+
+by default.
+
+
+---
+
+# Development Profile
+
+File:
+
+```text
+backend/src/main/resources/application-dev.properties
+```
+
+The development profile is used for local application development.
+
+Database configuration should use environment variables:
+
+```properties
+spring.datasource.url=${DB_URL}
+spring.datasource.username=${DB_USERNAME}
+spring.datasource.password=${DB_PASSWORD}
+```
+
+Actuator and logging:
+
+```properties
+management.endpoints.web.exposure.include=*
+management.endpoint.env.show-values=never
+management.endpoint.health.show-details=always
+
+logging.level.root=INFO
+logging.level.com.example.hrmspolicies2=DEBUG
+```
+
+The development profile has been tested successfully.
+
+
+---
+
+# Test Profile
+
+File:
+
+```text
+backend/src/main/resources/application-test.properties
+```
+
+Example:
+
+```properties
+spring.datasource.url=${TEST_DB_URL:jdbc:postgresql://localhost:5432/hrmspolicies_test}
+spring.datasource.username=${TEST_DB_USERNAME:postgres}
+spring.datasource.password=${TEST_DB_PASSWORD:}
+
+management.endpoints.web.exposure.include=*
+management.endpoint.env.show-values=never
+management.endpoint.health.show-details=always
+
+logging.level.root=INFO
+logging.level.com.example.hrmspolicies2=INFO
+```
+
+Real test database credentials are intentionally not committed to Git.
+
+When a dedicated test database is used, provide:
+
+```text
+TEST_DB_URL
+TEST_DB_USERNAME
+TEST_DB_PASSWORD
+```
+
+through environment variables.
+
+The profile configuration exists even when a dedicated test database is not currently being used.
+
+
+---
+
+# Production Profile
+
+File:
+
+```text
+backend/src/main/resources/application-prod.properties
+```
+
+Example:
+
+```properties
+spring.datasource.url=${DB_URL}
+spring.datasource.username=${DB_USERNAME}
+spring.datasource.password=${DB_PASSWORD}
+
+management.endpoints.web.exposure.include=health,info,metrics
+management.endpoint.env.show-values=never
+management.endpoint.health.show-details=never
+
+logging.level.root=INFO
+logging.level.com.example.hrmspolicies2=INFO
+```
+
+Production database credentials must never be committed.
+
+They must be provided through the deployment environment.
+
+
+---
+
+# Externalized Configuration
+
+Sensitive application configuration is supplied using environment variables instead of hardcoded values.
+
+Main environment variables:
+
+```text
+SPRING_PROFILES_ACTIVE
+
+DB_URL
+DB_USERNAME
+DB_PASSWORD
+
+JWT_SECRET
+JWT_EXPIRATION
+
+GOOGLE_CLIENT_ID
+GOOGLE_CLIENT_SECRET
+
+MAIL_USERNAME
+MAIL_PASSWORD
+
+CORS_ALLOWED_ORIGINS
+
+MAIL_ENABLED
+MAIL_FROM
+```
+
+If the frontend URL is also externalized, use:
+
+```text
+FRONTEND_URL
+```
+
+
+---
+
+# Database Environment Configuration
+
+Recommended database configuration:
+
+```properties
+spring.datasource.url=${DB_URL}
+spring.datasource.username=${DB_USERNAME}
+spring.datasource.password=${DB_PASSWORD}
+```
+
+Example environment values:
+
+```env
+DB_URL=jdbc:postgresql://localhost:5432/hrmspolicies2
+DB_USERNAME=your_database_username
+DB_PASSWORD=your_database_password
+```
+
+Do not place real database credentials inside the README or committed property files.
+
+
+---
+
+# JWT Environment Configuration
+
+JWT secrets must be externally configured.
+
+Example:
+
+```properties
+jwt.secret=${JWT_SECRET}
+jwt.expiration=${JWT_EXPIRATION:86400000}
+```
+
+Environment variables:
+
+```env
+JWT_SECRET=your_long_secure_jwt_secret
+JWT_EXPIRATION=86400000
+```
+
+The actual JWT secret must never be committed.
+
+
+---
+
+# Google OAuth Environment Configuration
+
+Google OAuth credentials use environment variables.
+
+Example:
+
+```properties
+spring.security.oauth2.client.registration.google.client-id=${GOOGLE_CLIENT_ID}
+spring.security.oauth2.client.registration.google.client-secret=${GOOGLE_CLIENT_SECRET}
+spring.security.oauth2.client.registration.google.scope=openid,profile,email
+```
+
+Environment variables:
+
+```env
+GOOGLE_CLIENT_ID=your_google_client_id
+GOOGLE_CLIENT_SECRET=your_google_client_secret
+```
+
+The Google client secret must never be hardcoded or committed.
+
+
+---
+
+# Mail Environment Configuration
+
+Mail configuration should also use environment variables.
+
+Example:
+
+```properties
+spring.mail.username=${MAIL_USERNAME}
+spring.mail.password=${MAIL_PASSWORD}
+```
+
+Environment variables:
+
+```env
+MAIL_USERNAME=your_email_address
+MAIL_PASSWORD=your_mail_app_password
+```
+
+Optional notification configuration:
+
+```properties
+notifications.mail-enabled=${MAIL_ENABLED:false}
+notifications.from-email=${MAIL_FROM:noreply@enfec.com}
+```
+
+Example:
+
+```env
+MAIL_ENABLED=false
+MAIL_FROM=noreply@enfec.com
+```
+
+
+---
+
+# CORS Environment Configuration
+
+Local frontend:
+
+```text
+http://localhost:3000
+```
+
+CORS origins should preferably be externalized.
+
+Example:
+
+```properties
+app.cors.allowed-origins=${CORS_ALLOWED_ORIGINS:http://localhost:3000}
+```
+
+Environment variable:
+
+```env
+CORS_ALLOWED_ORIGINS=http://localhost:3000
+```
+
+Production should use the actual deployed frontend URL.
+
+
+---
+
+# Example Development Environment Variables
+
+Example only:
+
+```env
+SPRING_PROFILES_ACTIVE=dev
+
+DB_URL=jdbc:postgresql://localhost:5432/hrmspolicies2
+DB_USERNAME=your_database_username
+DB_PASSWORD=your_database_password
+
+JWT_SECRET=your_long_secure_jwt_secret
+JWT_EXPIRATION=86400000
+
+GOOGLE_CLIENT_ID=your_google_client_id
+GOOGLE_CLIENT_SECRET=your_google_client_secret
+
+MAIL_USERNAME=your_email_address
+MAIL_PASSWORD=your_mail_app_password
+
+CORS_ALLOWED_ORIGINS=http://localhost:3000
+
+MAIL_ENABLED=false
+MAIL_FROM=noreply@enfec.com
+```
+
+These values are examples only.
+
+Real credentials must never be added to this README.
+
+
+---
+
+# Secret Management Rules
+
+Never commit:
+
+```text
+Database passwords
+JWT secrets
+Google client secrets
+Google OAuth access tokens
+Google OAuth refresh tokens
+Google authorization codes
+Mail passwords
+Password reset tokens
+User passwords
+API secrets
+Authorization headers
+Bearer tokens
+```
+
+Secrets should always be supplied externally through environment variables or an approved secret-management system.
+
+If a secret was previously committed to Git, deleting it from the latest file does not remove it from previous Git history.
+
+Any exposed credential should be rotated.
+
+
+---
+
+# Structured Application Logging
+
+The backend uses SLF4J for structured application logging.
+
+The project follows a key-value logging format:
+
+```text
+event=EVENT_NAME key=value key=value
+```
+
+Example:
+
+```java
+log.info(
+        "event=POLICY_CREATED policyId={} code={} status={} actorUserId={}",
+        policy.getId(),
+        policy.getCode(),
+        policy.getStatus(),
+        user.getId()
+);
+```
+
+This structure makes application logs easier to:
+
+```text
+Search
+Filter
+Analyze
+Monitor
+Troubleshoot
+Forward to centralized logging systems
+```
+
+
+---
+
+# Logging Levels
+
+The backend follows the following logging strategy.
+
+
+## INFO
+
+Used for important successful business operations.
+
+Examples:
+
+```text
+USER_SIGNUP_SUCCESS
+LOGIN_SUCCESS
+POLICY_CREATED
+POLICY_UPDATED
+POLICY_SUBMITTED_FOR_REVIEW
+POLICY_APPROVED
+POLICY_PUBLISHED
+POLICY_ACKNOWLEDGED
+POLICY_RETIRED
+POLICY_REMINDER_SENT
+PASSWORD_RESET_SUCCESS
+OAUTH2_USER_CREATED
+```
+
+
+## DEBUG
+
+Used for detailed read operations and development diagnostics.
+
+Examples:
+
+```text
+POLICY_SEARCH_REQUEST
+POLICY_VERSIONS_REQUEST
+NOTIFICATION_LIST_REQUEST
+COMPLIANCE_DASHBOARD_REQUEST
+POLICY_REMINDER_SKIPPED
+MY_POLICY_STATUS_REQUEST
+```
+
+
+## WARN
+
+Used for expected business failures, validation failures, and authorization failures.
+
+Examples:
+
+```text
+LOGIN_FAILED
+LOGIN_REJECTED
+POLICY_ACCESS_DENIED
+POLICY_PUBLISH_REJECTED
+POLICY_RETIRE_REJECTED
+POLICY_ACKNOWLEDGEMENT_DENIED
+OAUTH2_LOGIN_REJECTED
+VALIDATION_FAILED
+FORBIDDEN_REQUEST
+RESOURCE_NOT_FOUND
+```
+
+
+## ERROR
+
+Used for unexpected technical failures.
+
+Examples:
+
+```text
+UNHANDLED_EXCEPTION
+PASSWORD_RESET_EMAIL_FAILED
+PASSWORD_CHANGED_EMAIL_FAILED
+POLICY_DELETE_FAILED
+```
+
+
+---
+
+# Logging Coverage
+
+Structured logging has been added to important business, security, and monitoring-related classes.
+
+Current logging coverage includes:
+
+```text
+AuthService
+
+PolicyService
+
+PolicyApprovalService
+
+PolicyPublishingService
+
+PolicyAcknowledgementService
+
+PolicyRetirementService
+
+NewJoinerPolicyAssignmentService
+
+NotificationService
+
+ReminderHistoryService
+
+PolicyReminderService
+
+ComplianceService
+
+PasswordResetEmailService
+
+GlobalExceptionHandler
+
+OAuth2AuthenticationSuccessHandler
+
+OAuth2AuthenticationFailureHandler
+```
+
+
+---
+
+# Policy Logging
+
+Important policy events include:
+
+```text
+POLICY_CREATE_REQUEST
+POLICY_CREATED
+
+POLICY_UPDATE_REQUEST
+POLICY_UPDATED
+
+POLICY_DELETE_REQUEST
+POLICY_DELETED
+
+POLICY_SUBMIT_FOR_REVIEW_REQUEST
+POLICY_SUBMITTED_FOR_REVIEW
+
+POLICY_APPROVAL_REQUEST
+POLICY_APPROVED
+
+POLICY_REJECTION_REQUEST
+POLICY_REJECTED
+
+POLICY_PUBLISH_REQUEST
+POLICY_VERSION_CREATED
+POLICY_PUBLISHED
+
+POLICY_ACKNOWLEDGEMENT_REQUEST
+POLICY_ACKNOWLEDGED
+
+POLICY_RETIRE_REQUEST
+POLICY_RETIRED
+```
+
+
+---
+
+# Authentication Logging
+
+Authentication events include:
+
+```text
+USER_SIGNUP_REQUEST
+USER_SIGNUP_SUCCESS
+USER_SIGNUP_REJECTED
+
+LOGIN_REQUEST
+LOGIN_SUCCESS
+LOGIN_FAILED
+LOGIN_REJECTED
+
+PASSWORD_RESET_REQUEST
+PASSWORD_RESET_EMAIL_SENT
+PASSWORD_RESET_TOKEN_VALIDATION_SUCCESS
+PASSWORD_RESET_TOKEN_VALIDATION_FAILED
+PASSWORD_RESET_SUCCESS
+PASSWORD_RESET_FAILED
+```
+
+
+---
+
+# Google OAuth Logging
+
+Google OAuth events include:
+
+```text
+OAUTH2_LOGIN_SUCCESS
+OAUTH2_LOGIN_FAILED
+OAUTH2_LOGIN_REJECTED
+
+OAUTH2_EXISTING_USER_LOGIN
+OAUTH2_USER_CREATED
+
+OAUTH2_APPLICATION_SESSION_CREATED
+
+OAUTH2_REDIRECT_SUCCESS
+OAUTH2_FAILURE_REDIRECT
+
+OAUTH2_TEMP_SESSION_CLEARED
+```
+
+OAuth access tokens and application JWT values are never logged.
+
+
+---
+
+# Reminder Logging
+
+Reminder processing events include:
+
+```text
+POLICY_REMINDER_JOB_STARTED
+POLICY_REMINDER_OVERDUE_ASSIGNMENTS_FOUND
+POLICY_REMINDER_JOB_COMPLETED
+
+POLICY_REMINDER_DUE
+POLICY_REMINDER_SENT
+POLICY_REMINDER_DELIVERY_FAILED
+
+POLICY_REMINDER_SKIPPED
+POLICY_REMINDER_ASSIGNMENT_ACKNOWLEDGED
+POLICY_REMINDER_ESCALATION_FALLBACK
+```
+
+
+---
+
+# Notification Logging
+
+Notification events include:
+
+```text
+NOTIFICATION_LIST_REQUEST
+NOTIFICATION_LIST_COMPLETED
+
+NOTIFICATION_UNREAD_COUNT_REQUEST
+NOTIFICATION_UNREAD_COUNT_COMPLETED
+
+NOTIFICATION_MARK_READ_REQUEST
+NOTIFICATION_MARKED_READ
+NOTIFICATION_MARK_READ_FAILED
+
+NOTIFICATION_AUTHENTICATION_FAILED
+```
+
+
+---
+
+# Compliance Logging
+
+Compliance events include:
+
+```text
+COMPLIANCE_DASHBOARD_REQUEST
+COMPLIANCE_DASHBOARD_COMPLETED
+
+COMPLIANCE_EMPLOYEES_LOADED
+COMPLIANCE_POLICY_CALCULATED
+COMPLIANCE_POLICY_SKIPPED
+
+COMPLIANCE_CSV_EXPORT_REQUEST
+COMPLIANCE_CSV_EXPORT_COMPLETED
+
+COMPLIANCE_DASHBOARD_REJECTED
+COMPLIANCE_REQUEST_REJECTED
+```
+
+
+---
+
+# Global Exception Logging
+
+The Global Exception Handler logs important HTTP and application failures.
+
+Events include:
+
+```text
+RESOURCE_NOT_FOUND
+
+DUPLICATE_RESOURCE
+
+UNAUTHORIZED_REQUEST
+
+FORBIDDEN_REQUEST
+
+BAD_REQUEST
+
+VALIDATION_FAILED
+
+MISSING_REQUEST_PARAMETER
+
+REQUEST_PARAMETER_TYPE_MISMATCH
+
+UNHANDLED_EXCEPTION
+```
+
+Unexpected exceptions are logged using:
+
+```text
+ERROR
+```
+
+Expected application problems use:
+
+```text
+WARN
+```
+
+
+---
+
+# Sensitive Data Logging Policy
+
+The application must never log:
+
+```text
+User passwords
+
+Confirm passwords
+
+BCrypt input passwords
+
+JWT tokens
+
+JWT secrets
+
+Google OAuth access tokens
+
+Google OAuth refresh tokens
+
+Google authorization codes
+
+Google client secrets
+
+Password reset tokens
+
+Password reset URLs containing tokens
+
+Database passwords
+
+Mail passwords
+
+Authorization headers
+
+Bearer tokens
+
+Authentication cookies containing credentials
+```
+
+Notification/email message bodies should also not be logged unless explicitly required and appropriately protected.
+
+
+---
+
+# Password Reset Security
+
+Password reset tokens are generated and stored by the backend.
+
+They must never appear in logs.
+
+The password reset flow is:
+
+```text
+User requests password reset
+        ↓
+Backend finds user
+        ↓
+Old reset tokens removed
+        ↓
+New secure token generated
+        ↓
+Token stored
+        ↓
+Reset email sent
+        ↓
+User opens reset link
+        ↓
+Backend validates token
+        ↓
+Password validated
+        ↓
+Password BCrypt encoded
+        ↓
+Token marked as used
+        ↓
+Password changed email sent
+```
+
+Passwords and reset tokens are never logged.
+
+
+---
+
+# Running the Backend Using Development Profile
+
+From the backend directory:
+
+```powershell
+cd backend
+```
+
+Run:
+
+```powershell
+mvn spring-boot:run
+```
+
+The default profile is:
+
+```text
+dev
+```
+
+when configured using:
+
+```properties
+spring.profiles.active=${SPRING_PROFILES_ACTIVE:dev}
+```
+
+
+---
+
+# Running With Explicit Development Profile
+
+PowerShell:
+
+```powershell
+$env:SPRING_PROFILES_ACTIVE="dev"
+mvn spring-boot:run
+```
+
+Alternatively:
+
+```powershell
+mvn spring-boot:run "-Dspring-boot.run.profiles=dev"
+```
+
+
+---
+
+# IntelliJ Environment Configuration
+
+In IntelliJ IDEA:
+
+```text
+Run
+→ Edit Configurations
+→ Application
+→ Environment Variables
+```
+
+Add the required development environment variables.
+
+Example:
+
+```text
+SPRING_PROFILES_ACTIVE=dev
+
+DB_URL=jdbc:postgresql://localhost:5432/hrmspolicies2
+
+DB_USERNAME=your_database_username
+
+DB_PASSWORD=your_database_password
+
+JWT_SECRET=your_secure_jwt_secret
+
+GOOGLE_CLIENT_ID=your_google_client_id
+
+GOOGLE_CLIENT_SECRET=your_google_client_secret
+
+MAIL_USERNAME=your_email
+
+MAIL_PASSWORD=your_mail_app_password
+
+CORS_ALLOWED_ORIGINS=http://localhost:3000
+```
+
+Do not put real credentials into Git.
+
+
+---
+
+# Development Verification
+
+After starting the application, verify:
+
+```text
+http://localhost:8080/actuator/health
+```
+
+Expected:
+
+```json
+{
+  "status": "UP"
+}
+```
+
+Also verify:
+
+```text
+http://localhost:8080/actuator/info
+```
+
+and:
+
+```text
+http://localhost:8080/actuator/metrics
+```
+
+
+---
+
+# Verify Structured Logs
+
+Perform a normal login.
+
+Expected console events may include:
+
+```text
+event=LOGIN_REQUEST
+event=LOGIN_SUCCESS
+```
+
+Creating a policy may produce:
+
+```text
+event=POLICY_CREATE_REQUEST
+event=POLICY_CREATED
+```
+
+Submitting a policy may produce:
+
+```text
+event=POLICY_SUBMIT_FOR_REVIEW_REQUEST
+event=POLICY_SUBMITTED_FOR_REVIEW
+```
+
+Publishing may produce:
+
+```text
+event=POLICY_PUBLISH_REQUEST
+event=POLICY_VERSION_CREATED
+event=POLICY_PUBLISHED
+```
+
+Acknowledging a policy may produce:
+
+```text
+event=POLICY_ACKNOWLEDGEMENT_REQUEST
+event=POLICY_ACKNOWLEDGED
+```
+
+
+---
+
+# Development Verification Checklist
+
+Verify the following before committing:
+
+```text
+[x] Spring Boot backend starts
+
+[x] Development profile loads
+
+[x] PostgreSQL connection works
+
+[x] Spring Boot Actuator is integrated
+
+[x] /actuator/health works
+
+[x] PostgreSQL health is UP
+
+[x] Mail health is available
+
+[ ] /actuator/info verified
+
+[ ] /actuator/metrics verified
+
+[ ] Login verified after logging changes
+
+[ ] Google OAuth verified after logging changes
+
+[ ] Policy creation verified after logging changes
+
+[ ] Policy approval verified after logging changes
+
+[ ] Policy publishing verified after logging changes
+
+[ ] Policy acknowledgement verified after logging changes
+
+[ ] Structured logs visible in backend console
+
+[ ] Passwords do not appear in logs
+
+[ ] JWT values do not appear in logs
+
+[ ] OAuth tokens do not appear in logs
+
+[ ] Password-reset tokens do not appear in logs
+
+[ ] Real credentials are not staged for Git
+```
+
+Update the unchecked items after verifying them locally.
+
+
+---
+
+# Test Environment Status
+
+The test profile is configured.
+
+Real test database credentials are intentionally not committed.
+
+A dedicated test database can later be configured using:
+
+```text
+TEST_DB_URL
+TEST_DB_USERNAME
+TEST_DB_PASSWORD
+```
+
+The absence of real test credentials in Git is intentional and is part of the application's secret-management approach.
+
+
+---
+
+# Production Environment Status
+
+The production profile is configured to use externalized configuration.
+
+Real production credentials are not stored in the repository.
+
+Production deployment must provide:
+
+```text
+DB_URL
+DB_USERNAME
+DB_PASSWORD
+
+JWT_SECRET
+
+GOOGLE_CLIENT_ID
+GOOGLE_CLIENT_SECRET
+
+MAIL_USERNAME
+MAIL_PASSWORD
+
+CORS_ALLOWED_ORIGINS
+```
+
+
+---
+
+# Production Security Checklist
+
+Before deploying to production:
+
+```text
+[ ] Set SPRING_PROFILES_ACTIVE=prod
+
+[ ] Configure production DB_URL
+
+[ ] Configure production DB_USERNAME
+
+[ ] Configure production DB_PASSWORD
+
+[ ] Configure strong production JWT_SECRET
+
+[ ] Configure production GOOGLE_CLIENT_ID
+
+[ ] Configure production GOOGLE_CLIENT_SECRET
+
+[ ] Configure production MAIL_USERNAME
+
+[ ] Configure production MAIL_PASSWORD
+
+[ ] Configure production CORS_ALLOWED_ORIGINS
+
+[ ] Restrict Actuator exposure
+
+[ ] Hide Actuator health details
+
+[ ] Keep environment values hidden
+
+[ ] Use HTTPS
+
+[ ] Do not commit .env files
+
+[ ] Do not commit passwords or tokens
+
+[ ] Rotate credentials if previously exposed
+```
+
+
+---
+
+# Git Security Verification
+
+Before committing:
+
+```powershell
+git status
+```
+
+Review every staged file.
+
+Make sure no file contains real:
+
+```text
+DB password
+JWT secret
+Google client secret
+Mail password
+OAuth token
+Password reset token
+```
+
+
+---
+
+# Recommended Git Branch
+
+Recommended feature branch:
+
+```text
+feature/logging-actuator-profiles
+```
+
+
+---
+
+# Recommended Commit Messages
+
+Example commits:
+
+```text
+Add environment profiles and actuator configuration
+```
+
+```text
+Add structured logging for policy operations
+```
+
+```text
+Add authentication reminder and exception logging
+```
+
+```text
+Document backend monitoring and environment setup
+```
+
+
+---
+
+# Current EOD Implementation Status
+
+Current implementation status:
+
+```text
+Structured application logging
+COMPLETED
+
+Important business operation logging
+COMPLETED
+
+Authentication logging
+COMPLETED
+
+OAuth login logging
+COMPLETED
+
+Policy workflow logging
+COMPLETED
+
+Publishing logging
+COMPLETED
+
+Acknowledgement logging
+COMPLETED
+
+Retirement logging
+COMPLETED
+
+Reminder logging
+COMPLETED
+
+Notification logging
+COMPLETED
+
+Compliance logging
+COMPLETED
+
+Global exception logging
+COMPLETED
+
+Password reset email logging
+COMPLETED
+
+Spring Boot Actuator
+INTEGRATED
+
+Actuator health endpoint
+VERIFIED
+
+PostgreSQL health
+VERIFIED
+
+Development profile
+CONFIGURED AND TESTED
+
+Test profile
+CONFIGURED
+
+Production profile
+CONFIGURED
+
+Database configuration externalization
+CONFIGURED
+
+JWT configuration externalization
+CONFIGURED
+
+Google OAuth configuration externalization
+CONFIGURED
+
+Mail configuration externalization
+CONFIGURED
+
+Sensitive values in logs
+AVOIDED
+
+Real test credentials committed
+NO
+
+Real production credentials committed
+NO
+```
+
+
+---
+
+# EOD Deliverables
+
+The backend EOD work includes:
+
+```text
+1. Structured application logging
+
+2. Logging of important business operations
+
+3. Logging of authentication and authorization events
+
+4. Logging of unexpected application errors
+
+5. No passwords or tokens logged
+
+6. Spring Boot Actuator integration
+
+7. Application health endpoint
+
+8. Application information endpoint
+
+9. Application metrics endpoint
+
+10. Development profile
+
+11. Test profile
+
+12. Production profile
+
+13. Externalized database credentials
+
+14. Externalized JWT secrets
+
+15. Externalized Google OAuth credentials
+
+16. Externalized mail credentials
+
+17. Development environment successfully running
+
+18. PostgreSQL health verification
+
+19. Backend documentation updated
+
+20. Git verification before commit/push
+```
+
+
+---
+
+# Final Notes
+
+The development environment is currently the primary environment used for functional verification.
+
+The test and production profiles are configured but require their real environment-specific database and authentication credentials when those environments are deployed.
+
+Sensitive configuration must remain outside source control.
+
+The application should continue using:
+
+```text
+INFO
+```
+
+for important state-changing operations,
+
+```text
+DEBUG
+```
+
+for detailed read and diagnostic operations,
+
+```text
+WARN
+```
+
+for expected business, validation, and access failures,
+
+and:
+
+```text
+ERROR
+```
+
+for unexpected technical failures.
+
+When adding future functionality, follow the same logging and security rules.

@@ -214,6 +214,10 @@ public class SecurityConfig {
                                 )
                                 .permitAll()
 
+                                .requestMatchers(
+                                        "/actuator/**"
+                                ).permitAll()
+
                                 // ---------------------------------
                                 // CREATE POLICY
                                 // HR Admin only

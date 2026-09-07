@@ -2,14 +2,18 @@ package com.example.hrmspolicies2.exception;
 
 import com.example.hrmspolicies2.dto.response.ApiError;
 import jakarta.servlet.http.HttpServletRequest;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.util.List;
@@ -22,8 +26,15 @@ import java.util.stream.Collectors;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    // =========================================================
+    // STRUCTURED LOGGING
+    // =========================================================
+
     private static final Logger log =
-            LoggerFactory.getLogger(GlobalExceptionHandler.class);
+            LoggerFactory.getLogger(
+                    GlobalExceptionHandler.class
+            );
+
 
     // =========================================================
     // 404 - RESOURCE NOT FOUND
@@ -34,8 +45,10 @@ public class GlobalExceptionHandler {
             ResourceNotFoundException ex,
             HttpServletRequest request
     ) {
+
         log.warn(
-                "Resource not found at [{}]: {}",
+                "event=RESOURCE_NOT_FOUND method={} path={} message={}",
+                request.getMethod(),
                 request.getRequestURI(),
                 ex.getMessage()
         );
@@ -47,6 +60,7 @@ public class GlobalExceptionHandler {
         );
     }
 
+
     // =========================================================
     // 409 - DUPLICATE RESOURCE
     // =========================================================
@@ -56,8 +70,10 @@ public class GlobalExceptionHandler {
             DuplicateResourceException ex,
             HttpServletRequest request
     ) {
+
         log.warn(
-                "Duplicate resource conflict at [{}]: {}",
+                "event=DUPLICATE_RESOURCE method={} path={} message={}",
+                request.getMethod(),
                 request.getRequestURI(),
                 ex.getMessage()
         );
@@ -68,6 +84,7 @@ public class GlobalExceptionHandler {
                 request
         );
     }
+
 
     // =========================================================
     // 401 - UNAUTHORIZED
@@ -80,8 +97,10 @@ public class GlobalExceptionHandler {
             UnauthorizedException ex,
             HttpServletRequest request
     ) {
+
         log.warn(
-                "Unauthorized request at [{}]: {}",
+                "event=UNAUTHORIZED_REQUEST method={} path={} message={}",
+                request.getMethod(),
                 request.getRequestURI(),
                 ex.getMessage()
         );
@@ -92,6 +111,7 @@ public class GlobalExceptionHandler {
                 request
         );
     }
+
 
     // =========================================================
     // 403 - FORBIDDEN
@@ -104,8 +124,10 @@ public class GlobalExceptionHandler {
             ForbiddenException ex,
             HttpServletRequest request
     ) {
+
         log.warn(
-                "Forbidden request at [{}]: {}",
+                "event=FORBIDDEN_REQUEST method={} path={} message={}",
+                request.getMethod(),
                 request.getRequestURI(),
                 ex.getMessage()
         );
@@ -117,6 +139,7 @@ public class GlobalExceptionHandler {
         );
     }
 
+
     // =========================================================
     // 400 - CUSTOM BAD REQUEST
     // =========================================================
@@ -126,8 +149,10 @@ public class GlobalExceptionHandler {
             BadRequestException ex,
             HttpServletRequest request
     ) {
+
         log.warn(
-                "Bad request at [{}]: {}",
+                "event=BAD_REQUEST method={} path={} message={}",
+                request.getMethod(),
                 request.getRequestURI(),
                 ex.getMessage()
         );
@@ -139,6 +164,7 @@ public class GlobalExceptionHandler {
         );
     }
 
+
     // =========================================================
     // 400 - BEAN VALIDATION ERRORS
     // Handles errors from @Valid, @NotBlank, @Email, etc.
@@ -149,33 +175,47 @@ public class GlobalExceptionHandler {
             MethodArgumentNotValidException ex,
             HttpServletRequest request
     ) {
-        List<String> errors = ex.getBindingResult()
-                .getFieldErrors()
-                .stream()
-                .map(fieldError ->
-                        fieldError.getField()
-                                + ": "
-                                + fieldError.getDefaultMessage()
-                )
-                .collect(Collectors.toList());
+
+        List<String> errors =
+                ex.getBindingResult()
+                        .getFieldErrors()
+                        .stream()
+                        .map(
+                                fieldError ->
+                                        fieldError.getField()
+                                                + ": "
+                                                + fieldError
+                                                .getDefaultMessage()
+                        )
+                        .collect(
+                                Collectors.toList()
+                        );
 
         log.warn(
-                "Validation failed at [{}]: {}",
+                "event=VALIDATION_FAILED method={} path={} errorCount={} errors={}",
+                request.getMethod(),
                 request.getRequestURI(),
+                errors.size(),
                 errors
         );
 
-        ApiError error = new ApiError(
-                "Validation failed for one or more fields",
-                HttpStatus.BAD_REQUEST.value(),
-                request.getRequestURI(),
-                errors
-        );
+        ApiError error =
+                new ApiError(
+                        "Validation failed for one or more fields",
+                        HttpStatus.BAD_REQUEST.value(),
+                        request.getRequestURI(),
+                        errors
+                );
 
         return ResponseEntity
-                .status(HttpStatus.BAD_REQUEST)
-                .body(error);
+                .status(
+                        HttpStatus.BAD_REQUEST
+                )
+                .body(
+                        error
+                );
     }
+
 
     // =========================================================
     // 400 - MISSING REQUEST PARAMETER
@@ -186,14 +226,16 @@ public class GlobalExceptionHandler {
             MissingServletRequestParameterException ex,
             HttpServletRequest request
     ) {
+
         String message =
                 "Missing required parameter: "
                         + ex.getParameterName();
 
         log.warn(
-                "Missing request parameter at [{}]: {}",
+                "event=MISSING_REQUEST_PARAMETER method={} path={} parameter={}",
+                request.getMethod(),
                 request.getRequestURI(),
-                message
+                ex.getParameterName()
         );
 
         return build(
@@ -202,6 +244,7 @@ public class GlobalExceptionHandler {
                 request
         );
     }
+
 
     // =========================================================
     // 400 - INVALID REQUEST PARAMETER TYPE
@@ -213,6 +256,7 @@ public class GlobalExceptionHandler {
             MethodArgumentTypeMismatchException ex,
             HttpServletRequest request
     ) {
+
         String message =
                 "Invalid value for parameter '"
                         + ex.getName()
@@ -220,9 +264,11 @@ public class GlobalExceptionHandler {
                         + ex.getValue();
 
         log.warn(
-                "Request parameter type mismatch at [{}]: {}",
+                "event=REQUEST_PARAMETER_TYPE_MISMATCH method={} path={} parameter={} value={}",
+                request.getMethod(),
                 request.getRequestURI(),
-                message
+                ex.getName(),
+                ex.getValue()
         );
 
         return build(
@@ -231,6 +277,7 @@ public class GlobalExceptionHandler {
                 request
         );
     }
+
 
     // =========================================================
     // 500 - UNHANDLED EXCEPTION
@@ -243,9 +290,14 @@ public class GlobalExceptionHandler {
             Exception ex,
             HttpServletRequest request
     ) {
+
         log.error(
-                "Unhandled exception at [{}]",
+                "event=UNHANDLED_EXCEPTION method={} path={} exceptionType={} message={}",
+                request.getMethod(),
                 request.getRequestURI(),
+                ex.getClass()
+                        .getSimpleName(),
+                ex.getMessage(),
                 ex
         );
 
@@ -256,6 +308,7 @@ public class GlobalExceptionHandler {
         );
     }
 
+
     // =========================================================
     // RESPONSE BUILDER
     // =========================================================
@@ -265,14 +318,20 @@ public class GlobalExceptionHandler {
             String message,
             HttpServletRequest request
     ) {
-        ApiError error = new ApiError(
-                message,
-                status.value(),
-                request.getRequestURI()
-        );
+
+        ApiError error =
+                new ApiError(
+                        message,
+                        status.value(),
+                        request.getRequestURI()
+                );
 
         return ResponseEntity
-                .status(status)
-                .body(error);
+                .status(
+                        status
+                )
+                .body(
+                        error
+                );
     }
 }

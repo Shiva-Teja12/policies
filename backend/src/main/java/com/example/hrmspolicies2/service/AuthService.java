@@ -5,31 +5,35 @@ import com.example.hrmspolicies2.dto.ForgotPasswordRequest;
 import com.example.hrmspolicies2.dto.LoginRequest;
 import com.example.hrmspolicies2.dto.ResetPasswordRequest;
 import com.example.hrmspolicies2.dto.SignupRequest;
+import com.example.hrmspolicies2.entity.PasswordResetToken;
 import com.example.hrmspolicies2.entity.User;
 import com.example.hrmspolicies2.enums.AccountStatus;
 import com.example.hrmspolicies2.enums.Role;
 import com.example.hrmspolicies2.exception.BadRequestException;
 import com.example.hrmspolicies2.exception.DuplicateResourceException;
 import com.example.hrmspolicies2.exception.ForbiddenException;
-import com.example.hrmspolicies2.exception.ResourceNotFoundException;
 import com.example.hrmspolicies2.exception.UnauthorizedException;
+import com.example.hrmspolicies2.repository.PasswordResetTokenRepository;
 import com.example.hrmspolicies2.repository.UserRepository;
 import com.example.hrmspolicies2.security.JwtService;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import com.example.hrmspolicies2.entity.PasswordResetToken;
-import com.example.hrmspolicies2.repository.PasswordResetTokenRepository;
 
 import java.time.LocalDateTime;
-import java.util.UUID;
 import java.util.Locale;
+import java.util.UUID;
 import java.util.regex.Pattern;
 
 @Service
 public class AuthService {
+
+    // =========================================================
+    // STRUCTURED LOGGING
+    // =========================================================
 
     private static final Logger log =
             LoggerFactory.getLogger(
@@ -42,7 +46,7 @@ public class AuthService {
                             + "(?=.*[A-Z])"
                             + "(?=.*\\d)"
                             + "(?=.*[^A-Za-z\\d])"
-                            + ".{8,72}$"
+                            + ".{8,12}$"
             );
 
     private final UserRepository userRepository;
@@ -54,21 +58,33 @@ public class AuthService {
     private final NewJoinerPolicyAssignmentService
             newJoinerPolicyAssignmentService;
 
-    private final PasswordResetTokenRepository passwordResetTokenRepository;
+    private final PasswordResetTokenRepository
+            passwordResetTokenRepository;
 
-    private final PasswordResetEmailService passwordResetEmailService;
+    private final PasswordResetEmailService
+            passwordResetEmailService;
+
 
     public AuthService(
             UserRepository userRepository,
             PasswordEncoder passwordEncoder,
             JwtService jwtService,
-            NewJoinerPolicyAssignmentService newJoinerPolicyAssignmentService,
-            PasswordResetTokenRepository passwordResetTokenRepository,
-            PasswordResetEmailService passwordResetEmailService
+            NewJoinerPolicyAssignmentService
+                    newJoinerPolicyAssignmentService,
+            PasswordResetTokenRepository
+                    passwordResetTokenRepository,
+            PasswordResetEmailService
+                    passwordResetEmailService
     ) {
-        this.userRepository = userRepository;
-        this.passwordEncoder = passwordEncoder;
-        this.jwtService = jwtService;
+        this.userRepository =
+                userRepository;
+
+        this.passwordEncoder =
+                passwordEncoder;
+
+        this.jwtService =
+                jwtService;
+
         this.newJoinerPolicyAssignmentService =
                 newJoinerPolicyAssignmentService;
 
@@ -78,6 +94,7 @@ public class AuthService {
         this.passwordResetEmailService =
                 passwordResetEmailService;
     }
+
 
     // =========================================================
     // EMPLOYEE SIGNUP
@@ -89,6 +106,7 @@ public class AuthService {
     public AuthResponse signup(
             SignupRequest request
     ) {
+
         String name =
                 request.getName()
                         .trim();
@@ -98,10 +116,22 @@ public class AuthService {
                         request.getEmail()
                 );
 
+        log.info(
+                "event=USER_SIGNUP_REQUEST email={} requestedRole={}",
+                email,
+                Role.EMPLOYEE
+        );
+
         if (!request.getPassword()
                 .equals(
                         request.getConfirmPassword()
                 )) {
+
+            log.warn(
+                    "event=USER_SIGNUP_REJECTED email={} reason=PASSWORD_MISMATCH",
+                    email
+            );
+
             throw new BadRequestException(
                     "Password and confirm password do not match"
             );
@@ -112,9 +142,16 @@ public class AuthService {
                         request.getPassword()
                 )
                 .matches()) {
+
+            log.warn(
+                    "event=USER_SIGNUP_REJECTED email={} reason=WEAK_PASSWORD",
+                    email
+            );
+
             throw new BadRequestException(
-                    "Password must contain uppercase, "
-                            + "lowercase, number and special character"
+                    "Password must be 8 to 12 characters and contain "
+                            + "at least one uppercase letter, lowercase letter, "
+                            + "number and special character"
             );
         }
 
@@ -122,6 +159,12 @@ public class AuthService {
                 .existsByEmailIgnoreCase(
                         email
                 )) {
+
+            log.warn(
+                    "event=USER_SIGNUP_REJECTED email={} reason=DUPLICATE_EMAIL",
+                    email
+            );
+
             throw new DuplicateResourceException(
                     "An account already exists with this email"
             );
@@ -129,8 +172,12 @@ public class AuthService {
 
         User employee =
                 User.builder()
-                        .name(name)
-                        .email(email)
+                        .name(
+                                name
+                        )
+                        .email(
+                                email
+                        )
                         .password(
                                 passwordEncoder
                                         .encode(
@@ -166,14 +213,15 @@ public class AuthService {
                         );
 
         log.info(
-                "Employee account registered: "
-                        + "userId={}, email={}, assignedPolicies={}",
+                "event=USER_SIGNUP_SUCCESS userId={} email={} role={} assignedPolicies={}",
                 savedUser.getId(),
                 savedUser.getEmail(),
+                savedUser.getRole(),
                 assignedPolicies
         );
 
-        return AuthResponse.builder()
+        return AuthResponse
+                .builder()
                 .message(
                         "Employee account created successfully"
                 )
@@ -196,29 +244,45 @@ public class AuthService {
                 .build();
     }
 
+
     // =========================================================
     // ROLE-VERIFIED LOGIN
-    // The selected portal must match the role stored in MySQL.
+    // The selected portal must match the role stored in DB.
     // =========================================================
 
     @Transactional(readOnly = true)
     public AuthResponse login(
             LoginRequest request
     ) {
+
         String email =
                 normalizeEmail(
                         request.getEmail()
                 );
+
+        log.info(
+                "event=LOGIN_REQUEST email={} selectedRole={}",
+                email,
+                request.getSelectedRole()
+        );
 
         User user =
                 userRepository
                         .findByEmailIgnoreCase(
                                 email
                         )
-                        .orElseThrow(() ->
-                                new UnauthorizedException(
-                                        "Invalid email or password"
-                                )
+                        .orElseThrow(
+                                () -> {
+
+                                    log.warn(
+                                            "event=LOGIN_FAILED email={} reason=USER_NOT_FOUND",
+                                            email
+                                    );
+
+                                    return new UnauthorizedException(
+                                            "Invalid email or password"
+                                    );
+                                }
                         );
 
         boolean passwordMatches =
@@ -228,8 +292,9 @@ public class AuthService {
                 );
 
         if (!passwordMatches) {
+
             log.warn(
-                    "Failed login attempt for email={}",
+                    "event=LOGIN_FAILED email={} reason=INVALID_PASSWORD",
                     email
             );
 
@@ -240,6 +305,13 @@ public class AuthService {
 
         if (user.getAccountStatus()
                 == AccountStatus.LOCKED) {
+
+            log.warn(
+                    "event=LOGIN_REJECTED userId={} email={} reason=ACCOUNT_LOCKED",
+                    user.getId(),
+                    email
+            );
+
             throw new ForbiddenException(
                     "Your account is locked. "
                             + "Please contact support."
@@ -248,6 +320,13 @@ public class AuthService {
 
         if (user.getAccountStatus()
                 == AccountStatus.DISABLED) {
+
+            log.warn(
+                    "event=LOGIN_REJECTED userId={} email={} reason=ACCOUNT_DISABLED",
+                    user.getId(),
+                    email
+            );
+
             throw new ForbiddenException(
                     "Your account is disabled. "
                             + "Please contact support."
@@ -256,6 +335,15 @@ public class AuthService {
 
         if (user.getRole()
                 != request.getSelectedRole()) {
+
+            log.warn(
+                    "event=LOGIN_REJECTED userId={} email={} reason=ROLE_MISMATCH actualRole={} selectedRole={}",
+                    user.getId(),
+                    email,
+                    user.getRole(),
+                    request.getSelectedRole()
+            );
+
             throw new ForbiddenException(
                     "This account is not authorized for the selected "
                             + portalName(
@@ -273,14 +361,17 @@ public class AuthService {
                 );
 
         log.info(
-                "Successful login: userId={}, email={}, role={}",
+                "event=LOGIN_SUCCESS userId={} email={} role={}",
                 user.getId(),
                 user.getEmail(),
                 user.getRole()
         );
 
-        return AuthResponse.builder()
-                .token(token)
+        return AuthResponse
+                .builder()
+                .token(
+                        token
+                )
                 .message(
                         "Login successful"
                 )
@@ -303,10 +394,9 @@ public class AuthService {
                 .build();
     }
 
+
     // =========================================================
     // FORGOT PASSWORD
-    // Currently verifies whether an account exists.
-    // A production application should send a secure reset token.
     // =========================================================
 
     @Transactional
@@ -319,62 +409,199 @@ public class AuthService {
                         request.getEmail()
                 );
 
-        /*
-         * Do not reveal whether the email exists.
-         */
+        log.info(
+                "event=PASSWORD_RESET_REQUEST email={}",
+                email
+        );
+
         User user =
                 userRepository
-                        .findByEmailIgnoreCase(email)
-                        .orElse(null);
+                        .findByEmailIgnoreCase(
+                                email
+                        )
+                        .orElse(
+                                null
+                        );
 
         if (user == null) {
-            return "If an account exists for this email, "
-                    + "a password reset link has been sent.";
+
+            log.warn(
+                    "event=PASSWORD_RESET_REQUEST_FAILED email={} reason=USER_NOT_FOUND",
+                    email
+            );
+
+            throw new BadRequestException(
+                    "The email is not registered: "
+                            + email
+            );
         }
 
         /*
-         * Remove old reset tokens for this user.
+         * Remove previous reset tokens
+         * belonging to this user.
          */
         passwordResetTokenRepository
-                .deleteByUser(user);
+                .deleteByUser(
+                        user
+                );
+
+        log.debug(
+                "event=PASSWORD_RESET_OLD_TOKENS_REMOVED userId={}",
+                user.getId()
+        );
 
         /*
          * Generate secure random token.
+         *
+         * IMPORTANT:
+         * Never log this token.
          */
         String token =
-                UUID.randomUUID().toString()
+                UUID.randomUUID()
+                        .toString()
                         + UUID.randomUUID();
 
         PasswordResetToken resetToken =
                 new PasswordResetToken();
 
-        resetToken.setToken(token);
-        resetToken.setUser(user);
+        resetToken.setToken(
+                token
+        );
+
+        resetToken.setUser(
+                user
+        );
 
         /*
-         * Reset link is valid for 15 minutes.
+         * Reset link remains valid according
+         * to the existing application logic.
          */
         resetToken.setExpiresAt(
                 LocalDateTime.now()
-                        .plusMinutes(15)
+                        .plusMinutes(
+                                10
+                        )
         );
 
         passwordResetTokenRepository.save(
                 resetToken
         );
 
-        passwordResetEmailService.sendResetEmail(
-                user.getEmail(),
-                user.getName(),
-                token
+        log.debug(
+                "event=PASSWORD_RESET_TOKEN_CREATED userId={} expiresAt={}",
+                user.getId(),
+                resetToken.getExpiresAt()
         );
 
-        return "If an account exists for this email, "
-                + "a password reset link has been sent.";
+        passwordResetEmailService
+                .sendResetEmail(
+                        user.getEmail(),
+                        user.getName(),
+                        token
+                );
+
+        log.info(
+                "event=PASSWORD_RESET_EMAIL_SENT userId={} email={}",
+                user.getId(),
+                user.getEmail()
+        );
+
+        return "Reset link has been sent to "
+                + email;
     }
+
+
+    // =========================================================
+    // VALIDATE PASSWORD RESET TOKEN
+    // Called immediately when /reset-password opens.
+    // =========================================================
+
+    @Transactional(readOnly = true)
+    public String validateResetToken(
+            String token
+    ) {
+
+        log.debug(
+                "event=PASSWORD_RESET_TOKEN_VALIDATION_REQUEST"
+        );
+
+        if (token == null
+                || token.isBlank()) {
+
+            log.warn(
+                    "event=PASSWORD_RESET_TOKEN_VALIDATION_FAILED reason=MISSING_TOKEN"
+            );
+
+            throw new BadRequestException(
+                    "Invalid password reset link"
+            );
+        }
+
+        PasswordResetToken resetToken =
+                passwordResetTokenRepository
+                        .findByToken(
+                                token
+                        )
+                        .orElseThrow(
+                                () -> {
+
+                                    log.warn(
+                                            "event=PASSWORD_RESET_TOKEN_VALIDATION_FAILED reason=TOKEN_NOT_FOUND"
+                                    );
+
+                                    return new BadRequestException(
+                                            "Invalid password reset link"
+                                    );
+                                }
+                        );
+
+        /*
+         * Do not allow the same reset link
+         * to be reused.
+         */
+        if (resetToken.isUsed()) {
+
+            log.warn(
+                    "event=PASSWORD_RESET_TOKEN_VALIDATION_FAILED userId={} reason=TOKEN_ALREADY_USED",
+                    resetToken.getUser()
+                            .getId()
+            );
+
+            throw new BadRequestException(
+                    "This password reset link has already been used"
+            );
+        }
+
+        /*
+         * Check expiry immediately when
+         * the reset-password page opens.
+         */
+        if (resetToken.isExpired()) {
+
+            log.warn(
+                    "event=PASSWORD_RESET_TOKEN_VALIDATION_FAILED userId={} reason=TOKEN_EXPIRED",
+                    resetToken.getUser()
+                            .getId()
+            );
+
+            throw new BadRequestException(
+                    "Password reset link has expired"
+            );
+        }
+
+        log.debug(
+                "event=PASSWORD_RESET_TOKEN_VALIDATION_SUCCESS userId={}",
+                resetToken.getUser()
+                        .getId()
+        );
+
+        return "Password reset link is valid";
+    }
+
+
     // =========================================================
     // RESET PASSWORD
-    // The new password is always stored as a BCrypt hash.
+    // The new password is stored as a BCrypt hash.
     // =========================================================
 
     @Transactional
@@ -382,11 +609,38 @@ public class AuthService {
             ResetPasswordRequest request
     ) {
 
+        log.info(
+                "event=PASSWORD_RESET_SUBMIT_REQUEST"
+        );
+
         if (!request.getNewPassword()
-                .equals(request.getConfirmPassword())) {
+                .equals(
+                        request.getConfirmPassword()
+                )) {
+
+            log.warn(
+                    "event=PASSWORD_RESET_FAILED reason=PASSWORD_MISMATCH"
+            );
 
             throw new BadRequestException(
                     "New password and confirm password do not match"
+            );
+        }
+
+        if (!STRONG_PASSWORD
+                .matcher(
+                        request.getNewPassword()
+                )
+                .matches()) {
+
+            log.warn(
+                    "event=PASSWORD_RESET_FAILED reason=WEAK_PASSWORD"
+            );
+
+            throw new BadRequestException(
+                    "Password must be 8 to 12 characters and contain "
+                            + "at least one uppercase letter, lowercase letter, "
+                            + "number and special character"
             );
         }
 
@@ -395,19 +649,44 @@ public class AuthService {
                         .findByToken(
                                 request.getToken()
                         )
-                        .orElseThrow(() ->
-                                new BadRequestException(
-                                        "Invalid password reset link"
-                                )
+                        .orElseThrow(
+                                () -> {
+
+                                    log.warn(
+                                            "event=PASSWORD_RESET_FAILED reason=INVALID_RESET_TOKEN"
+                                    );
+
+                                    return new BadRequestException(
+                                            "Invalid password reset link"
+                                    );
+                                }
                         );
 
+        /*
+         * Backend checks are still required.
+         * Do not rely only on frontend validation.
+         */
         if (resetToken.isUsed()) {
+
+            log.warn(
+                    "event=PASSWORD_RESET_FAILED userId={} reason=TOKEN_ALREADY_USED",
+                    resetToken.getUser()
+                            .getId()
+            );
+
             throw new BadRequestException(
                     "This password reset link has already been used"
             );
         }
 
         if (resetToken.isExpired()) {
+
+            log.warn(
+                    "event=PASSWORD_RESET_FAILED userId={} reason=TOKEN_EXPIRED",
+                    resetToken.getUser()
+                            .getId()
+            );
+
             throw new BadRequestException(
                     "Password reset link has expired"
             );
@@ -425,19 +704,24 @@ public class AuthService {
                 )
         );
 
-        userRepository.save(user);
+        userRepository.save(
+                user
+        );
 
         /*
-         * Prevent reuse of the reset link.
+         * Mark the token as used so the
+         * reset link cannot be reused.
          */
-        resetToken.setUsed(true);
+        resetToken.setUsed(
+                true
+        );
 
         passwordResetTokenRepository.save(
                 resetToken
         );
 
         /*
-         * Only send confirmation.
+         * Send password-change confirmation.
          * Never send the actual password.
          */
         passwordResetEmailService
@@ -446,8 +730,16 @@ public class AuthService {
                         user.getName()
                 );
 
+        log.info(
+                "event=PASSWORD_RESET_SUCCESS userId={} email={}",
+                user.getId(),
+                user.getEmail()
+        );
+
         return "Password reset successfully";
     }
+
+
     // =========================================================
     // HELPERS
     // =========================================================
@@ -455,16 +747,20 @@ public class AuthService {
     private String normalizeEmail(
             String email
     ) {
+
         return email.trim()
                 .toLowerCase(
                         Locale.ROOT
                 );
     }
 
+
     private String portalName(
             Role role
     ) {
+
         return switch (role) {
+
             case HR_ADMIN ->
                     "HR Admin";
 
